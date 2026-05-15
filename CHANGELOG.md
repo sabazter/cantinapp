@@ -18,6 +18,24 @@ Registro de todos los cambios realizados y planificados, más la documentación 
 
 ## Historial de Cambios
 
+### [2026-05-15] Corrección de conexión DB + baseline de migraciones + login verificado
+**Tipo:** fix  
+**Módulos:** Auth, DB, Infraestructura  
+**Archivos modificados:**
+- `src/lib/supabase-server.ts` — nuevo cliente Supabase REST (service role)
+- `src/lib/auth.ts` — user lookup migrado de Prisma a Supabase REST API
+- `src/lib/brute-force.ts` — reescrito con Supabase REST (login_intentos)
+- `src/lib/audit.ts` — reescrito con Supabase REST (audit_logs); columnas snake_case corregidas
+- `src/app/globals.css` — corregido import Tailwind v3 (removido v4 imports)
+- `tailwind.config.ts` — añadidos colores shadcn/ui y font family
+- `next.config.mjs` — CSP connect-src extendido para Supabase REST y WebSocket
+- `prisma/migrations/20260515000000_init/migration.sql` — baseline migration generada
+- `prisma/migrations/migration_lock.toml` — lock file creado
+- `vercel.json` — configuración de build para Vercel
+
+**Descripción:**  
+La conexión directa PostgreSQL via Prisma/Supavisor no es alcanzable desde el entorno local (error P1017 en puerto 5432 session mode; tenant not found en puerto 6543 transaction mode). La solución fue migrar las operaciones críticas de auth a `@supabase/supabase-js` REST API, que usa HTTPS y funciona sin problemas. Login verificado end-to-end: `admin@cantinapp.com` / `Admin2026!` retorna 200. Se creó la tabla `_prisma_migrations` en Supabase via MCP y se insertó el registro de la migration baseline para que Prisma reconozca el estado actual de la DB.
+
 ### [2026-05-15] Fase 0.5 — Seguridad Fundacional implementada
 **Tipo:** feat  
 **Módulos:** Auth, Seguridad, Auditoría  

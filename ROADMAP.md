@@ -10,8 +10,9 @@
 
 ## Estado Actual
 
-> **Fase:** Fase 0 completada — setup de entorno base commiteado.  
-> **Pendiente antes de Fase 1:** configurar Supabase, aplicar migraciones, completar Fase 0.5 (seguridad fundacional).
+> **Fase:** Fase 0.5 completada (2026-05-15). Listo para Sprint 1.1.  
+> **Nota Supabase:** tablas creadas vía MCP (no `prisma migrate dev`); baseline registrada en `_prisma_migrations`. Acceso a DB vía Supabase REST API (`@supabase/supabase-js`). Conexión directa PostgreSQL/Prisma bloqueada por Supavisor en este entorno — no afecta la app, que usa la REST API.  
+> **Vercel:** deploy pendiente de autenticación manual — ejecutar `npx vercel` en el directorio y seguir el wizard.
 
 ---
 
@@ -40,52 +41,52 @@
 | 0.6 | Middleware de protección de rutas por rol | ✅ |
 | 0.7 | `.env.example` documentado | ✅ |
 | 0.8 | Prisma generate sin errores TypeScript | ✅ |
-| 0.9 | 🔴 Conectar Supabase (añadir DATABASE_URL al .env.local) | ⬜ |
-| 0.10 | 🔴 `npx prisma migrate dev` — crear tablas en Supabase | ⬜ |
-| 0.11 | Deploy inicial en Vercel (sin funcionalidad) | ⬜ |
+| 0.9 | Conectar Supabase (DATABASE_URL + NEXT_PUBLIC_SUPABASE_URL) | ✅ |
+| 0.10 | Tablas en Supabase + baseline migration en `_prisma_migrations` | ✅ |
+| 0.11 | Deploy inicial en Vercel | ⬜ Pendiente autenticación manual |
 
 ---
 
 ## Fase 0.5 — Seguridad Fundacional
-**Duración estimada:** 3–4 días | **Estado:** ⬜ Pendiente  
+**Duración estimada:** 3–4 días | **Estado:** ✅ Completado (2026-05-15)  
 **Referencia:** Secciones 2, 4 y 8 de `CantinApp_Seguridad_y_CRM.md`
 
 > 🔴 **Bloqueante.** Esta fase debe completarse antes de escribir cualquier endpoint de negocio. Los patrones de seguridad establecidos aquí se aplican a todos los sprints posteriores.
 
 ### Autenticación segura
-| # | Tarea | Ref. |
-|---|-------|------|
-| 0.5.1 | Cambiar JWT a RS256: generar par de claves RSA, configurar en NextAuth | §2.2 |
-| 0.5.2 | Access token: 15 min. Refresh token: 7 días, cookie HttpOnly + Secure + SameSite=Strict | §2.2 |
-| 0.5.3 | Tabla `refresh_tokens` en Prisma (blacklist + rotación en cada uso) | §2.2 |
-| 0.5.4 | Auto-logout por inactividad: 10 min vendedor / 30 min admin (timer en cliente) | §2.3 |
-| 0.5.5 | Botón de cierre de sesión prominente + revocar refresh token en servidor | §2.3 |
-| 0.5.6 | Tabla `login_intentos` para bloqueo tras 5 intentos fallidos (15 min); bloqueo permanente a los 20 | §2.5 |
-| 0.5.7 | Rate limiting en `POST /api/auth/login`: 10 req/min por IP (Upstash Redis + `@upstash/ratelimit`) | §2.5 / §4.1 |
-| 0.5.8 | Notificar al admin por email cuando una cuenta es bloqueada | §2.5 |
+| # | Tarea | Ref. | Estado |
+|---|-------|------|--------|
+| 0.5.1 | Cambiar JWT a RS256: generar par de claves RSA, configurar en NextAuth | §2.2 | ✅ |
+| 0.5.2 | Access token: 15 min. Refresh token: 7 días, cookie HttpOnly + Secure + SameSite=Strict | §2.2 | ✅ |
+| 0.5.3 | Tabla `refresh_tokens` en Prisma (blacklist + rotación en cada uso) | §2.2 | ✅ |
+| 0.5.4 | Auto-logout por inactividad: 10 min vendedor / 30 min admin (timer en cliente) | §2.3 | ✅ |
+| 0.5.5 | Botón de cierre de sesión prominente + revocar refresh token en servidor | §2.3 | ✅ |
+| 0.5.6 | Tabla `login_intentos` para bloqueo tras 5 intentos fallidos (15 min); bloqueo permanente a los 20 | §2.5 | ✅ |
+| 0.5.7 | Rate limiting en `POST /api/auth/login`: 10 req/min por IP (Upstash Redis + `@upstash/ratelimit`) | §2.5 / §4.1 | ✅ |
+| 0.5.8 | Notificar al admin por email cuando una cuenta es bloqueada | §2.5 | ✅ |
 
 ### API y validación
-| # | Tarea | Ref. |
-|---|-------|------|
-| 0.5.9 | Instalar Zod — crear helper `validateBody(schema)` para Route Handlers | §4.2 |
-| 0.5.10 | Helper `requireRole(...roles)` para verificar rol en server actions y Route Handlers | §3.2 |
-| 0.5.11 | Regla de aislamiento multi-tenant: `cantina_id` **siempre** del JWT, nunca del body | §3.3 |
-| 0.5.12 | Rate limiting global: 300 req/min por IP en cualquier endpoint autenticado | §4.1 |
-| 0.5.13 | Configurar headers de seguridad HTTP en `next.config.mjs` (CSP, HSTS, X-Frame, etc.) | §4.3 |
-| 0.5.14 | Manejo de errores centralizado: nunca exponer stack traces al cliente | §4.5 |
+| # | Tarea | Ref. | Estado |
+|---|-------|------|--------|
+| 0.5.9 | Instalar Zod — crear helper `validateBody(schema)` para Route Handlers | §4.2 | ✅ |
+| 0.5.10 | Helper `requireRole(...roles)` para verificar rol en server actions y Route Handlers | §3.2 | ✅ |
+| 0.5.11 | Regla de aislamiento multi-tenant: `cantina_id` **siempre** del JWT, nunca del body | §3.3 | ✅ |
+| 0.5.12 | Rate limiting global: 300 req/min por IP en cualquier endpoint autenticado | §4.1 | ✅ |
+| 0.5.13 | Configurar headers de seguridad HTTP en `next.config.mjs` (CSP, HSTS, X-Frame, etc.) | §4.3 | ✅ |
+| 0.5.14 | Manejo de errores centralizado: nunca exponer stack traces al cliente | §4.5 | ✅ |
 
 ### Auditoría
-| # | Tarea | Ref. |
-|---|-------|------|
-| 0.5.15 | Modelo `AuditLog` en Prisma (inmutable: sin UPDATE ni DELETE) | §8.1 |
-| 0.5.16 | Función `audit(event, data)` — registra userId, IP, timestamp, cantina_id | §8.2 |
-| 0.5.17 | Loguear login exitoso y login fallido (IP, timestamp, email — nunca contraseña) | §8.1 |
+| # | Tarea | Ref. | Estado |
+|---|-------|------|--------|
+| 0.5.15 | Modelo `AuditLog` en Prisma (inmutable: sin UPDATE ni DELETE) | §8.1 | ✅ |
+| 0.5.16 | Función `audit(event, data)` — registra userId, IP, timestamp, cantina_id | §8.2 | ✅ |
+| 0.5.17 | Loguear login exitoso y login fallido (IP, timestamp, email — nunca contraseña) | §8.1 | ✅ |
 
 ### Schema — soft delete
-| # | Tarea | Ref. |
-|---|-------|------|
-| 0.5.18 | Añadir `deleted_at` + `deleted_by` a tablas financieras: `ventas`, `abonos`, `movimientos_inventario` | §7.2 |
-| 0.5.19 | Nunca usar `.delete()` en tablas financieras — solo `.update({ data: { deleted_at } })` | §7.2 |
+| # | Tarea | Ref. | Estado |
+|---|-------|------|--------|
+| 0.5.18 | Añadir `deleted_at` + `deleted_by` a tablas financieras: `ventas`, `abonos`, `movimientos_inventario` | §7.2 | ✅ |
+| 0.5.19 | Nunca usar `.delete()` en tablas financieras — solo `.update({ data: { deleted_at } })` | §7.2 | ✅ |
 
 ---
 

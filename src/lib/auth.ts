@@ -3,8 +3,8 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { JWT } from "next-auth/jwt";
 import { SignJWT, jwtVerify, importPKCS8, importSPKI } from "jose";
 import bcrypt from "bcryptjs";
-import { db } from "@/lib/db";
 import { Rol } from "@/generated/prisma/enums";
+import { createServerSupabase } from "@/lib/supabase-server";
 import { verificarBloqueo, registrarIntento } from "@/lib/brute-force";
 import { audit, AuditEvent } from "@/lib/audit";
 
@@ -70,25 +70,57 @@ export const authOptions: NextAuthOptions = {
           (req?.headers?.["x-forwarded-for"] as string)?.split(",")[0].trim() ??
           "unknown";
 
-        // Verificar bloqueo por fuerza bruta
-        const bloqueo = await verificarBloqueo(credentials.email);
-        if (bloqueo.bloqueado) {
-          const errorCode = bloqueo.permanente
-            ? "bloqueado_permanente"
-            : "bloqueado_temporal";
-          throw new Error(errorCode);
+        try {
+          // Verificar bloqueo por fuerza bruta
+          const bloqueo = await verificarBloqueo(credentials.email);
+          if (bloqueo.bloqueado) {
+            const errorCode = bloqueo.permanente
+              ? "bloqueado_permanente"
+              : "bloqueado_temporal";
+            throw new Error(errorCode);
+          }
+        } catch (err) {
+          const msg = (err as Error).message;
+          if (msg === "bloqueado_permanente" || msg === "bloqueado_temporal") throw err;
+          console.error("[auth] verificarBloqueo error:", err);
+          // Continuar si el error es de BD (no bloquear al usuario por fallo de tabla)
         }
 
-        const usuario = await db.usuario.findUnique({
-          where: { email: credentials.email },
-        });
+        let usuario = null;
+        try {
+          const supabase = createServerSupabase();
+          const { data, error } = await supabase
+            .from("usuarios")
+            .select("id, cantina_id, nombre, email, hash_pwd, rol, activo")
+            .eq("email", credentials.email)
+            .single();
+          if (error) throw error;
+          if (data) {
+            usuario = {
+              id: data.id as string,
+              cantinaId: data.cantina_id as string | null,
+              nombre: data.nombre as string,
+              email: data.email as string,
+              hashPwd: data.hash_pwd as string,
+              rol: data.rol as Rol,
+              activo: data.activo as boolean,
+            };
+          }
+        } catch (err) {
+          console.error("[auth] findUnique error:", err);
+          return null;
+        }
 
         const ok =
           !!usuario &&
           usuario.activo &&
           (await bcrypt.compare(credentials.password, usuario.hashPwd));
 
-        await registrarIntento(credentials.email, ip, ok);
+        try {
+          await registrarIntento(credentials.email, ip, ok);
+        } catch (err) {
+          console.error("[auth] registrarIntento error:", err);
+        }
 
         if (!ok) {
           await audit({

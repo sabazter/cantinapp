@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { createServerSupabase } from "@/lib/supabase-server";
 import { headers } from "next/headers";
 
 interface AuditParams {
@@ -23,17 +23,16 @@ export async function audit(params: AuditParams): Promise<void> {
       "unknown";
     const userAgent = headersList.get("user-agent") ?? undefined;
 
-    await db.auditLog.create({
-      data: {
-        usuarioId: params.usuarioId,
-        cantinaId: params.cantinaId,
-        evento: params.evento,
-        entidad: params.entidad,
-        entidadId: params.entidadId,
-        datos: params.datos ?? undefined,
-        ip,
-        userAgent,
-      },
+    const supabase = createServerSupabase();
+    await supabase.from("audit_logs").insert({
+      usuario_id: params.usuarioId ?? null,
+      cantina_id: params.cantinaId ?? null,
+      evento: params.evento,
+      entidad: params.entidad ?? null,
+      entidad_id: params.entidadId ?? null,
+      datos: params.datos ?? null,
+      ip,
+      user_agent: userAgent ?? null,
     });
   } catch (err) {
     console.error("[audit] Error al registrar evento:", err);
