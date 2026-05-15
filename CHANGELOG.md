@@ -18,6 +18,31 @@ Registro de todos los cambios realizados y planificados, más la documentación 
 
 ## Historial de Cambios
 
+### [2026-05-15] Fase 0.5 — Seguridad Fundacional implementada
+**Tipo:** feat  
+**Módulos:** Auth, Seguridad, Auditoría  
+**Archivos creados/modificados:**
+- `prisma/schema.prisma` — nuevos modelos: `RefreshToken`, `LoginIntento`, `AuditLog`; soft delete en `Venta`, `Abono`, `MovimientoInventario`, `Alumno`; campos MFA en `Usuario`; `cedulaEncriptada` y `referenciaEncriptada`
+- `src/lib/auth.ts` — JWT RS256 con `jose`, access token 15 min, brute force protection integrada
+- `src/lib/brute-force.ts` — bloqueo temporal (5 intentos/15 min) y permanente (20 intentos)
+- `src/lib/audit.ts` — función `audit()` + catálogo `AuditEvent` (17 eventos predefinidos)
+- `src/lib/crypto.ts` — cifrado/descifrado AES-256-GCM para cédulas y referencias bancarias
+- `src/lib/rate-limit.ts` — rate limiting con Upstash Redis (login: 10/min, global: 300/min)
+- `src/lib/require-role.ts` — `requireRole()`, `withAuth()`, `ForbiddenError`, `UnauthorizedError`
+- `src/lib/validate.ts` — `validateBody()` con Zod, `ValidationError`, `withValidation()`
+- `next.config.mjs` — headers HTTP de seguridad (CSP, HSTS, X-Frame, X-Content-Type, Referrer, Permissions), redirect HTTP→HTTPS en producción
+- `src/app/login/page.tsx` + `login-form.tsx` — página de login con redirección por rol
+- `.env.example` — nuevas variables: `NEXTAUTH_PRIVATE_KEY`, `NEXTAUTH_PUBLIC_KEY`, `ENCRYPTION_KEY`, `INTERNAL_API_KEY`, `UPSTASH_REDIS_REST_URL/TOKEN`
+
+**Nuevas dependencias:** `zod`, `@upstash/ratelimit`, `@upstash/redis`, `otpauth`, `qrcode`, `react-hook-form`, `@hookform/resolvers`
+
+**Descripción:**  
+Todos los pilares de seguridad de la Fase 0.5 implementados. El sistema ahora firma JWTs con RS256 (no HS256), registra cada intento de login en `login_intentos`, bloquea cuentas automáticamente por fuerza bruta, audita operaciones sensibles, tiene cifrado AES-256-GCM para datos personales de menores, y aplica rate limiting via Redis. La página de login muestra mensajes de error diferenciados según el tipo de bloqueo.
+
+**Tareas del roadmap completadas:** 0.5.1–0.5.17 (autenticación, API, auditoría, soft delete)
+
+---
+
 ### [2026-05-15] Integración de especificaciones de Seguridad & CRM al roadmap
 **Tipo:** docs  
 **Módulo:** Documentación / Planificación  

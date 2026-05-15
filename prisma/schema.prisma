@@ -46,24 +46,86 @@ enum Rol {
 }
 
 model Usuario {
-  id          String    @id @default(cuid())
-  cantinaId   String?   @map("cantina_id")
-  nombre      String
-  email       String    @unique
-  hashPwd     String    @map("hash_pwd")
-  rol         Rol
-  telefono    String?
-  activo      Boolean   @default(true)
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id               String         @id @default(cuid())
+  cantinaId        String?        @map("cantina_id")
+  nombre           String
+  email            String         @unique
+  hashPwd          String         @map("hash_pwd")
+  rol              Rol
+  telefono         String?
+  activo           Boolean        @default(true)
+  mfaSecret        String?        @map("mfa_secret")
+  mfaHabilitado    Boolean        @default(false) @map("mfa_habilitado")
+  emailVerificado  Boolean        @default(false) @map("email_verificado")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
 
-  cantina     Cantina?  @relation(fields: [cantinaId], references: [id])
-  alumnos     Alumno[]  @relation("RepresentanteAlumnos")
-  ventasRealizadas Venta[] @relation("VendedorVentas")
-  abonosConfirmados Abono[] @relation("AdminAbonos")
-  notificaciones Notificacion[]
+  cantina          Cantina?       @relation(fields: [cantinaId], references: [id])
+  alumnos          Alumno[]       @relation("RepresentanteAlumnos")
+  ventasRealizadas Venta[]        @relation("VendedorVentas")
+  abonosConfirmados Abono[]       @relation("AdminAbonos")
+  notificaciones   Notificacion[]
+  refreshTokens    RefreshToken[]
+  auditLogs        AuditLog[]
 
   @@map("usuarios")
+}
+
+// ─────────────────────────────────────────────
+// Seguridad — Auth
+// ─────────────────────────────────────────────
+
+model RefreshToken {
+  id          String    @id @default(cuid())
+  usuarioId   String    @map("usuario_id")
+  tokenHash   String    @unique @map("token_hash")
+  userAgent   String?   @map("user_agent")
+  ip          String?
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  usuario     Usuario   @relation(fields: [usuarioId], references: [id])
+
+  @@index([usuarioId])
+  @@map("refresh_tokens")
+}
+
+model LoginIntento {
+  id          String    @id @default(cuid())
+  email       String
+  ip          String
+  exitoso     Boolean
+  bloqueado   Boolean   @default(false)
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
+  @@map("login_intentos")
+}
+
+// ─────────────────────────────────────────────
+// Auditoría (inmutable)
+// ─────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  usuarioId  String?  @map("usuario_id")
+  cantinaId  String?  @map("cantina_id")
+  evento     String
+  entidad    String?
+  entidadId  String?  @map("entidad_id")
+  datos      Json?
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  usuario    Usuario? @relation(fields: [usuarioId], references: [id])
+
+  @@index([cantinaId, createdAt])
+  @@index([usuarioId, createdAt])
+  @@index([evento, createdAt])
+  @@map("audit_logs")
 }
 
 // ─────────────────────────────────────────────
@@ -71,26 +133,30 @@ model Usuario {
 // ─────────────────────────────────────────────
 
 model Alumno {
-  id               String    @id @default(cuid())
-  cantinaId        String    @map("cantina_id")
-  representanteId  String?   @map("representante_id")
-  nombre           String
-  cedula           String
-  curso            String
-  seccion          String?
-  fotoUrl          String?   @map("foto_url")
-  qrCode           String?   @map("qr_code")
-  limiteFiadoUsd   Decimal?  @map("limite_fiado_usd") @db.Decimal(10, 2)
-  activo           Boolean   @default(true)
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id                  String    @id @default(cuid())
+  cantinaId           String    @map("cantina_id")
+  representanteId     String?   @map("representante_id")
+  nombre              String
+  cedulaEncriptada    String    @map("cedula_encriptada")
+  curso               String
+  seccion             String?
+  fotoUrl             String?   @map("foto_url")
+  qrCode              String?   @map("qr_code")
+  limiteFiadoUsd      Decimal?  @map("limite_fiado_usd") @db.Decimal(10, 2)
+  consentimientoIp    String?   @map("consentimiento_ip")
+  consentimientoAt    DateTime? @map("consentimiento_at")
+  activo              Boolean   @default(true)
+  deletedAt           DateTime? @map("deleted_at")
+  deletedBy           String?   @map("deleted_by")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
   cantina          Cantina   @relation(fields: [cantinaId], references: [id])
   representante    Usuario?  @relation("RepresentanteAlumnos", fields: [representanteId], references: [id])
   cuenta           CuentaAlumno?
   ventas           Venta[]
 
-  @@unique([cantinaId, cedula])
+  @@index([cantinaId])
   @@map("alumnos")
 }
 
@@ -147,6 +213,8 @@ model MovimientoInventario {
   cantidad    Int
   motivo      String?
   usuarioId   String?         @map("usuario_id")
+  deletedAt   DateTime?       @map("deleted_at")
+  deletedBy   String?         @map("deleted_by")
   createdAt   DateTime        @default(now()) @map("created_at")
 
   producto    Producto        @relation(fields: [productoId], references: [id])
@@ -199,6 +267,9 @@ model Venta {
   metodoPago   MetodoPago  @map("metodo_pago")
   esFiado      Boolean     @default(false) @map("es_fiado")
   referencia   String?
+  deletedAt    DateTime?   @map("deleted_at")
+  deletedBy    String?     @map("deleted_by")
+  deletedMotivo String?    @map("deleted_motivo")
   createdAt    DateTime    @default(now()) @map("created_at")
 
   cantina      Cantina     @relation(fields: [cantinaId], references: [id])
@@ -206,6 +277,7 @@ model Venta {
   alumno       Alumno?     @relation(fields: [alumnoId], references: [id])
   detalles     DetalleVenta[]
 
+  @@index([cantinaId, createdAt])
   @@map("ventas")
 }
 
@@ -240,22 +312,25 @@ enum EstadoAbono {
 }
 
 model Abono {
-  id              String      @id @default(cuid())
-  cuentaAlumnoId  String      @map("cuenta_alumno_id")
-  montoUsd        Decimal     @map("monto_usd") @db.Decimal(10, 4)
-  montoBs         Decimal?    @map("monto_bs") @db.Decimal(14, 4)
-  tasaBcv         Decimal?    @map("tasa_bcv") @db.Decimal(12, 4)
-  metodo          MetodoAbono
-  referencia      String?
-  banco           String?
-  comprobanteUrl  String?     @map("comprobante_url")
-  estado          EstadoAbono @default(pendiente)
-  confirmadoPor   String?     @map("confirmado_por")
-  confirmadoAt    DateTime?   @map("confirmado_at")
-  createdAt       DateTime    @default(now()) @map("created_at")
+  id                  String      @id @default(cuid())
+  cuentaAlumnoId      String      @map("cuenta_alumno_id")
+  montoUsd            Decimal     @map("monto_usd") @db.Decimal(10, 4)
+  montoBs             Decimal?    @map("monto_bs") @db.Decimal(14, 4)
+  tasaBcv             Decimal?    @map("tasa_bcv") @db.Decimal(12, 4)
+  metodo              MetodoAbono
+  referenciaEncriptada String?    @map("referencia_encriptada")
+  banco               String?
+  comprobanteUrl      String?     @map("comprobante_url")
+  estado              EstadoAbono @default(pendiente)
+  confirmadoPor       String?     @map("confirmado_por")
+  confirmadoAt        DateTime?   @map("confirmado_at")
+  motivoRechazo       String?     @map("motivo_rechazo")
+  deletedAt           DateTime?   @map("deleted_at")
+  deletedBy           String?     @map("deleted_by")
+  createdAt           DateTime    @default(now()) @map("created_at")
 
   cuentaAlumno    CuentaAlumno @relation(fields: [cuentaAlumnoId], references: [id])
-  admin           Usuario?    @relation("AdminAbonos", fields: [confirmadoPor], references: [id])
+  admin           Usuario?     @relation("AdminAbonos", fields: [confirmadoPor], references: [id])
 
   @@map("abonos")
 }
@@ -289,7 +364,6 @@ model Notificacion {
   usuarioId  String              @map("usuario_id")
   tipo       TipoNotificacion
   canal      CanalNotificacion
-  mensaje    String
   estado     EstadoNotificacion  @default(pendiente)
   enviadoAt  DateTime?           @map("enviado_at")
   createdAt  DateTime            @default(now()) @map("created_at")
