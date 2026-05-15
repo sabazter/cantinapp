@@ -91,7 +91,7 @@
 ---
 
 ## Fase 1 — MVP Core
-**Duración estimada:** 8–10 semanas | **Estado:** ⬜ Pendiente
+**Duración estimada:** 8–10 semanas | **Estado:** 🔄 En progreso
 
 > Cada sprint asume que la Fase 0.5 está completada. Los helpers de seguridad (`validateBody`, `requireRole`, `audit`) se usan desde el primer endpoint.
 
@@ -108,17 +108,17 @@
 | 1.1.8 | MFA TOTP obligatorio para rol `admin` (librería: `otpauth` + QR de setup) | §2.4 | ✅ |
 | 1.1.9 | "Cerrar todas las sesiones activas" desde panel del admin | §2.3 | ✅ |
 
-### Sprint 1.2 — Inventario (1.5 semanas)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 1.2.1 | CRUD de productos con Zod validation | §4.2 |
-| 1.2.2 | Categorías: tienda vs menú del día | — |
-| 1.2.3 | Control de stock y stock mínimo | — |
-| 1.2.4 | Alertas visuales de stock bajo | — |
-| 1.2.5 | Registro de entradas de mercancía (con audit log) | §8.1 |
-| 1.2.6 | Ajustes manuales de inventario con motivo (audit log) | §8.1 |
-| 1.2.7 | Historial de movimientos (`movimientos_inventario` con soft delete) | §7.2 |
-| 1.2.8 | Todos los endpoints: `cantina_id` del JWT | §3.3 |
+### Sprint 1.2 — Inventario (1.5 semanas) ✅ Completado (2026-05-15)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 1.2.1 | CRUD de productos con Zod validation | §4.2 | ✅ |
+| 1.2.2 | Categorías: tienda vs menú del día | — | ✅ |
+| 1.2.3 | Control de stock y stock mínimo | — | ✅ |
+| 1.2.4 | Alertas visuales de stock bajo | — | ✅ |
+| 1.2.5 | Registro de entradas de mercancía (con audit log) | §8.1 | ✅ |
+| 1.2.6 | Ajustes manuales de inventario con motivo (audit log) | §8.1 | ✅ |
+| 1.2.7 | Historial de movimientos (`movimientos_inventario` con soft delete) | §7.2 | ✅ |
+| 1.2.8 | Todos los endpoints: `cantina_id` del JWT | §3.3 | ✅ |
 
 ### Sprint 1.3 — Tasa BCV (3 días)
 | # | Tarea | Seg. |

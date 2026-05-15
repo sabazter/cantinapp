@@ -18,6 +18,22 @@ Registro de todos los cambios realizados y planificados, más la documentación 
 
 ## Historial de Cambios
 
+### [2026-05-15] Sprint 1.2 — Inventario completo
+**Tipo:** feat  
+**Módulo:** Inventario  
+**Archivos creados:**
+- `src/app/api/admin/inventario/route.ts` — GET (lista filtrada por cantina, categoría, stock bajo) + POST (crear producto con Zod)
+- `src/app/api/admin/inventario/[id]/route.ts` — PUT (editar) + DELETE (desactivar, soft via `activo: false`)
+- `src/app/api/admin/inventario/[id]/entrada/route.ts` — POST: suma stock, inserta movimiento tipo "entrada", audit log
+- `src/app/api/admin/inventario/[id]/ajuste/route.ts` — POST: ajuste ± stock (floor 0), motivo requerido, audit log
+- `src/app/api/admin/inventario/[id]/movimientos/route.ts` — GET: historial de movimientos excluye soft-deleted
+- `src/app/(admin)/admin/inventario/page.tsx` — server component wrapper
+- `src/app/(admin)/admin/inventario/inventario-client.tsx` — UI completa: filtros (todos/tienda/menú/stock bajo), alerta stock bajo, tabla con badge por categoría/estado, DropdownMenu acciones por fila, 5 modales (crear, editar, entrada, ajuste, historial)
+
+**Descripción:** Inventario completamente funcional. `cantina_id` siempre del JWT verificado. Todas las rutas de escritura validadas con Zod. Soft delete en movimientos (campo `deleted_at`). Audit log en entradas y ajustes. UI con alertas visuales cuando algún producto está en stock mínimo o por debajo.
+
+---
+
 ### [2026-05-15] Sprint 1.1 — Autenticación y Gestión de Usuarios completo
 **Tipo:** feat  
 **Módulos:** Auth, Usuarios, MFA, Layout  
