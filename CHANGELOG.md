@@ -18,6 +18,17 @@ Registro de todos los cambios realizados y planificados, más la documentación 
 
 ## Historial de Cambios
 
+### [2026-05-15] Reemplazar Vercel por Docker
+**Tipo:** chore  
+**Módulo:** Infraestructura  
+**Archivos:**
+- `Dockerfile` — imagen multi-stage (deps → builder → runner, node:22-alpine)
+- `.dockerignore` — excluye node_modules, .next, .env*.local, .git
+- `next.config.mjs` — `output: "standalone"` para imagen mínima
+- `vercel.json` — eliminado
+
+**Descripción:** El hosting es un servidor privado con Docker. La imagen usa `output: standalone` de Next.js (copiando solo `.next/standalone` y `.next/static`) para un contenedor de producción liviano. `NEXT_PUBLIC_SUPABASE_URL` se pasa como build arg; el resto de variables de entorno se inyectan en runtime.
+
 ### [2026-05-15] Corrección de conexión DB + baseline de migraciones + login verificado
 **Tipo:** fix  
 **Módulos:** Auth, DB, Infraestructura  

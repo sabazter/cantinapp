@@ -12,7 +12,7 @@
 
 > **Fase:** Fase 0.5 completada (2026-05-15). Listo para Sprint 1.1.  
 > **Nota Supabase:** tablas creadas vía MCP (no `prisma migrate dev`); baseline registrada en `_prisma_migrations`. Acceso a DB vía Supabase REST API (`@supabase/supabase-js`). Conexión directa PostgreSQL/Prisma bloqueada por Supavisor en este entorno — no afecta la app, que usa la REST API.  
-> **Vercel:** deploy pendiente de autenticación manual — ejecutar `npx vercel` en el directorio y seguir el wizard.
+> **Deploy:** Docker en servidor privado. Imagen multi-stage con `output: standalone`. Build: `docker build --build-arg NEXT_PUBLIC_SUPABASE_URL=... -t cantinapp .` — el resto de vars se inyectan en runtime.
 
 ---
 
@@ -43,7 +43,7 @@
 | 0.8 | Prisma generate sin errores TypeScript | ✅ |
 | 0.9 | Conectar Supabase (DATABASE_URL + NEXT_PUBLIC_SUPABASE_URL) | ✅ |
 | 0.10 | Tablas en Supabase + baseline migration en `_prisma_migrations` | ✅ |
-| 0.11 | Deploy inicial en Vercel | ⬜ Pendiente autenticación manual |
+| 0.11 | Dockerfile multi-stage + `.dockerignore` + `output: standalone` | ✅ |
 
 ---
 

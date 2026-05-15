@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.env
+.env*.local
+*.pem
+npm-debug.log*
+README.md
+CHANGELOG.md
+ROADMAP.md
+.agents/
+skills-lock.json
