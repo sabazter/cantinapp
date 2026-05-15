@@ -1,0 +1,300 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// Multi-tenant root
+// ─────────────────────────────────────────────
+
+model Cantina {
+  id               String    @id @default(cuid())
+  nombre           String
+  escuela          String
+  direccion        String?
+  tasaManual       Decimal?  @map("tasa_manual") @db.Decimal(12, 4)
+  limiteFiadoUsd   Decimal?  @map("limite_fiado_usd") @db.Decimal(10, 2)
+  umbralDeudaUsd   Decimal   @default(20) @map("umbral_deuda_usd") @db.Decimal(10, 2)
+  notifEmail       Boolean   @default(true) @map("notif_email")
+  notifWhatsapp    Boolean   @default(true) @map("notif_whatsapp")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  usuarios         Usuario[]
+  alumnos          Alumno[]
+  productos        Producto[]
+  ventas           Venta[]
+  tasasBcv         TasaBcv[]
+
+  @@map("cantinas")
+}
+
+// ─────────────────────────────────────────────
+// Usuarios del sistema
+// ─────────────────────────────────────────────
+
+enum Rol {
+  admin
+  vendedor
+  representante
+  directivo
+  superadmin
+}
+
+model Usuario {
+  id          String    @id @default(cuid())
+  cantinaId   String?   @map("cantina_id")
+  nombre      String
+  email       String    @unique
+  hashPwd     String    @map("hash_pwd")
+  rol         Rol
+  telefono    String?
+  activo      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  cantina     Cantina?  @relation(fields: [cantinaId], references: [id])
+  alumnos     Alumno[]  @relation("RepresentanteAlumnos")
+  ventasRealizadas Venta[] @relation("VendedorVentas")
+  abonosConfirmados Abono[] @relation("AdminAbonos")
+  notificaciones Notificacion[]
+
+  @@map("usuarios")
+}
+
+// ─────────────────────────────────────────────
+// Alumnos y cuentas
+// ─────────────────────────────────────────────
+
+model Alumno {
+  id               String    @id @default(cuid())
+  cantinaId        String    @map("cantina_id")
+  representanteId  String?   @map("representante_id")
+  nombre           String
+  cedula           String
+  curso            String
+  seccion          String?
+  fotoUrl          String?   @map("foto_url")
+  qrCode           String?   @map("qr_code")
+  limiteFiadoUsd   Decimal?  @map("limite_fiado_usd") @db.Decimal(10, 2)
+  activo           Boolean   @default(true)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  cantina          Cantina   @relation(fields: [cantinaId], references: [id])
+  representante    Usuario?  @relation("RepresentanteAlumnos", fields: [representanteId], references: [id])
+  cuenta           CuentaAlumno?
+  ventas           Venta[]
+
+  @@unique([cantinaId, cedula])
+  @@map("alumnos")
+}
+
+model CuentaAlumno {
+  id        String    @id @default(cuid())
+  alumnoId  String    @unique @map("alumno_id")
+  saldo     Decimal   @default(0) @db.Decimal(10, 2)
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  alumno    Alumno    @relation(fields: [alumnoId], references: [id])
+  abonos    Abono[]
+
+  @@map("cuentas_alumnos")
+}
+
+// ─────────────────────────────────────────────
+// Inventario
+// ─────────────────────────────────────────────
+
+enum CategoriaProducto {
+  tienda
+  menu
+}
+
+model Producto {
+  id          String             @id @default(cuid())
+  cantinaId   String             @map("cantina_id")
+  nombre      String
+  categoria   CategoriaProducto  @default(tienda)
+  precioUsd   Decimal            @map("precio_usd") @db.Decimal(10, 4)
+  stock       Int                @default(0)
+  stockMin    Int                @default(5) @map("stock_min")
+  activo      Boolean            @default(true)
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  cantina     Cantina            @relation(fields: [cantinaId], references: [id])
+  detalles    DetalleVenta[]
+  movimientos MovimientoInventario[]
+
+  @@map("productos")
+}
+
+enum TipoMovimiento {
+  entrada
+  venta
+  ajuste
+}
+
+model MovimientoInventario {
+  id          String          @id @default(cuid())
+  productoId  String          @map("producto_id")
+  tipo        TipoMovimiento
+  cantidad    Int
+  motivo      String?
+  usuarioId   String?         @map("usuario_id")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  producto    Producto        @relation(fields: [productoId], references: [id])
+
+  @@map("movimientos_inventario")
+}
+
+// ─────────────────────────────────────────────
+// Tasa BCV
+// ─────────────────────────────────────────────
+
+enum FuenteTasa {
+  automatica
+  manual
+}
+
+model TasaBcv {
+  id         String      @id @default(cuid())
+  cantinaId  String      @map("cantina_id")
+  fecha      DateTime    @db.Date
+  tasaUsdBs  Decimal     @map("tasa_usd_bs") @db.Decimal(12, 4)
+  fuente     FuenteTasa  @default(automatica)
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  cantina    Cantina     @relation(fields: [cantinaId], references: [id])
+
+  @@unique([cantinaId, fecha])
+  @@map("tasas_bcv")
+}
+
+// ─────────────────────────────────────────────
+// Ventas
+// ─────────────────────────────────────────────
+
+enum MetodoPago {
+  efectivo_usd
+  efectivo_bs
+  pago_movil
+  fiado
+}
+
+model Venta {
+  id           String      @id @default(cuid())
+  cantinaId    String      @map("cantina_id")
+  vendedorId   String      @map("vendedor_id")
+  alumnoId     String?     @map("alumno_id")
+  tasaBcv      Decimal     @map("tasa_bcv") @db.Decimal(12, 4)
+  totalUsd     Decimal     @map("total_usd") @db.Decimal(10, 4)
+  totalBs      Decimal     @map("total_bs") @db.Decimal(14, 4)
+  metodoPago   MetodoPago  @map("metodo_pago")
+  esFiado      Boolean     @default(false) @map("es_fiado")
+  referencia   String?
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  cantina      Cantina     @relation(fields: [cantinaId], references: [id])
+  vendedor     Usuario     @relation("VendedorVentas", fields: [vendedorId], references: [id])
+  alumno       Alumno?     @relation(fields: [alumnoId], references: [id])
+  detalles     DetalleVenta[]
+
+  @@map("ventas")
+}
+
+model DetalleVenta {
+  id                String   @id @default(cuid())
+  ventaId           String   @map("venta_id")
+  productoId        String   @map("producto_id")
+  cantidad          Int
+  precioUsdUnitario Decimal  @map("precio_usd_unitario") @db.Decimal(10, 4)
+
+  venta             Venta    @relation(fields: [ventaId], references: [id])
+  producto          Producto @relation(fields: [productoId], references: [id])
+
+  @@map("detalle_ventas")
+}
+
+// ─────────────────────────────────────────────
+// Abonos y pagos
+// ─────────────────────────────────────────────
+
+enum MetodoAbono {
+  efectivo_usd
+  efectivo_bs
+  pago_movil
+  transferencia
+}
+
+enum EstadoAbono {
+  pendiente
+  confirmado
+  rechazado
+}
+
+model Abono {
+  id              String      @id @default(cuid())
+  cuentaAlumnoId  String      @map("cuenta_alumno_id")
+  montoUsd        Decimal     @map("monto_usd") @db.Decimal(10, 4)
+  montoBs         Decimal?    @map("monto_bs") @db.Decimal(14, 4)
+  tasaBcv         Decimal?    @map("tasa_bcv") @db.Decimal(12, 4)
+  metodo          MetodoAbono
+  referencia      String?
+  banco           String?
+  comprobanteUrl  String?     @map("comprobante_url")
+  estado          EstadoAbono @default(pendiente)
+  confirmadoPor   String?     @map("confirmado_por")
+  confirmadoAt    DateTime?   @map("confirmado_at")
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  cuentaAlumno    CuentaAlumno @relation(fields: [cuentaAlumnoId], references: [id])
+  admin           Usuario?    @relation("AdminAbonos", fields: [confirmadoPor], references: [id])
+
+  @@map("abonos")
+}
+
+// ─────────────────────────────────────────────
+// Notificaciones
+// ─────────────────────────────────────────────
+
+enum TipoNotificacion {
+  fiado_registrado
+  abono_confirmado
+  deuda_alta
+  stock_bajo
+  resumen_diario
+  abono_pendiente
+}
+
+enum CanalNotificacion {
+  email
+  whatsapp
+}
+
+enum EstadoNotificacion {
+  pendiente
+  enviado
+  error
+}
+
+model Notificacion {
+  id         String              @id @default(cuid())
+  usuarioId  String              @map("usuario_id")
+  tipo       TipoNotificacion
+  canal      CanalNotificacion
+  mensaje    String
+  estado     EstadoNotificacion  @default(pendiente)
+  enviadoAt  DateTime?           @map("enviado_at")
+  createdAt  DateTime            @default(now()) @map("created_at")
+
+  usuario    Usuario             @relation(fields: [usuarioId], references: [id])
+
+  @@map("notificaciones")
+}

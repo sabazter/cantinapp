@@ -31,6 +31,34 @@ Registro de todos los cambios realizados y planificados, más la documentación 
 
 ---
 
+### [2026-05-15] Setup inicial del proyecto — Fase 0 completa
+**Tipo:** chore  
+**Módulos:** Infraestructura base  
+**Archivos creados/modificados:**
+- `package.json` — Next.js 14, Tailwind, shadcn/ui, Prisma 7, NextAuth 4, bcryptjs, pg adapter
+- `prisma/schema.prisma` — Esquema completo con 12 modelos y 8 enums
+- `prisma.config.ts` — Configuración de datasource para Prisma 7
+- `src/generated/prisma/` — Cliente Prisma generado (no commitear)
+- `src/lib/db.ts` — Singleton del cliente Prisma con PrismaPg adapter
+- `src/lib/auth.ts` — Configuración NextAuth con CredentialsProvider y JWT por roles
+- `src/app/api/auth/[...nextauth]/route.ts` — Route handler de NextAuth
+- `src/middleware.ts` — Protección de rutas por rol
+- `src/components/providers.tsx` — SessionProvider wrapper
+- `src/app/layout.tsx` — Root layout con Providers y metadata CantinApp
+- `.env.example` — Variables de entorno requeridas documentadas
+- `components.json` — Configuración shadcn/ui
+
+**Descripción:**  
+Setup completo de la Fase 0. El proyecto compila sin errores TypeScript. La base de datos necesita ser conectada (Supabase) y las migraciones aplicadas antes de continuar con la Fase 1 (Sprint 1.1 — Login y roles).
+
+**Notas técnicas:**
+- Prisma 7 requiere adaptador explícito (`@prisma/adapter-pg`), diferente a Prisma 5/6
+- Rol `superadmin` añadido al schema para gestión multi-tenant futura
+- JWT strategy elegida (no database sessions) para simplificar el MVP
+- shadcn/ui inicializado con configuración default; componentes se añaden por demanda
+
+---
+
 *(Los cambios futuros se registran aquí en orden cronológico descendente)*
 
 ---
