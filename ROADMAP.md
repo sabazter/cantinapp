@@ -95,18 +95,18 @@
 
 > Cada sprint asume que la Fase 0.5 está completada. Los helpers de seguridad (`validateBody`, `requireRole`, `audit`) se usan desde el primer endpoint.
 
-### Sprint 1.1 — Autenticación y Gestión de Usuarios (1 semana)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 1.1.1 | Página de login `/login` (email + contraseña) | — |
-| 1.1.2 | Lógica de login: verificar bloqueo, registrar intento, llamar NextAuth | §2.5 |
-| 1.1.3 | Página post-login: redirigir según rol al dashboard correspondiente | — |
-| 1.1.4 | Layout diferenciado por rol (sidebar con rutas permitidas) | — |
-| 1.1.5 | CRUD de usuarios — solo admin (`requireRole('admin')`) | §3.2 |
-| 1.1.6 | Hash bcrypt cost 12 al crear/editar usuario | §2.1 |
-| 1.1.7 | Flujo de reset de contraseña: token uso-único, expiración 15 min, email | §2.1 |
-| 1.1.8 | MFA TOTP obligatorio para rol `admin` (librería: `otpauth` + QR de setup) | §2.4 |
-| 1.1.9 | "Cerrar todas las sesiones activas" desde panel del admin | §2.3 |
+### Sprint 1.1 — Autenticación y Gestión de Usuarios ✅ Completado (2026-05-15)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 1.1.1 | Página de login `/login` (email + contraseña) | — | ✅ |
+| 1.1.2 | Lógica de login: verificar bloqueo, registrar intento, llamar NextAuth | §2.5 | ✅ |
+| 1.1.3 | Página post-login: redirigir según rol al dashboard correspondiente | — | ✅ |
+| 1.1.4 | Layout diferenciado por rol (sidebar con rutas permitidas) | — | ✅ |
+| 1.1.5 | CRUD de usuarios — solo admin (`requireRole('admin')`) | §3.2 | ✅ |
+| 1.1.6 | Hash bcrypt cost 12 al crear/editar usuario | §2.1 | ✅ |
+| 1.1.7 | Flujo de reset de contraseña: token uso-único, expiración 15 min, email | §2.1 | ✅ |
+| 1.1.8 | MFA TOTP obligatorio para rol `admin` (librería: `otpauth` + QR de setup) | §2.4 | ✅ |
+| 1.1.9 | "Cerrar todas las sesiones activas" desde panel del admin | §2.3 | ✅ |
 
 ### Sprint 1.2 — Inventario (1.5 semanas)
 | # | Tarea | Seg. |

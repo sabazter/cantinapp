@@ -2,6 +2,7 @@ import { NextAuthOptions, getServerSession } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { JWT } from "next-auth/jwt";
 import { SignJWT, jwtVerify, importPKCS8, importSPKI } from "jose";
+import * as OTPAuth from "otpauth";
 import bcrypt from "bcryptjs";
 import { Rol } from "@/generated/prisma/enums";
 import { createServerSupabase } from "@/lib/supabase-server";
@@ -60,8 +61,9 @@ export const authOptions: NextAuthOptions = {
     CredentialsProvider({
       name: "credentials",
       credentials: {
-        email: { label: "Email", type: "email" },
+        email:    { label: "Email",      type: "email"    },
         password: { label: "Contraseña", type: "password" },
+        totp:     { label: "Código MFA", type: "text"     },
       },
       async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) return null;
@@ -91,19 +93,21 @@ export const authOptions: NextAuthOptions = {
           const supabase = createServerSupabase();
           const { data, error } = await supabase
             .from("usuarios")
-            .select("id, cantina_id, nombre, email, hash_pwd, rol, activo")
+            .select("id, cantina_id, nombre, email, hash_pwd, rol, activo, mfa_habilitado, mfa_secret")
             .eq("email", credentials.email)
             .single();
           if (error) throw error;
           if (data) {
             usuario = {
-              id: data.id as string,
-              cantinaId: data.cantina_id as string | null,
-              nombre: data.nombre as string,
-              email: data.email as string,
-              hashPwd: data.hash_pwd as string,
-              rol: data.rol as Rol,
-              activo: data.activo as boolean,
+              id:            data.id as string,
+              cantinaId:     data.cantina_id as string | null,
+              nombre:        data.nombre as string,
+              email:         data.email as string,
+              hashPwd:       data.hash_pwd as string,
+              rol:           data.rol as Rol,
+              activo:        data.activo as boolean,
+              mfaHabilitado: data.mfa_habilitado as boolean,
+              mfaSecret:     data.mfa_secret as string | null,
             };
           }
         } catch (err) {
@@ -128,6 +132,30 @@ export const authOptions: NextAuthOptions = {
             datos: { email: credentials.email },
           });
           return null;
+        }
+
+        // Verificar MFA si está habilitado
+        if (usuario!.mfaHabilitado && usuario!.mfaSecret) {
+          if (!credentials.totp) throw new Error("mfa_required");
+
+          const totp = new OTPAuth.TOTP({
+            issuer:    "CantinApp",
+            label:     usuario!.email,
+            algorithm: "SHA1",
+            digits:    6,
+            period:    30,
+            secret:    OTPAuth.Secret.fromBase32(usuario!.mfaSecret),
+          });
+
+          if (totp.validate({ token: credentials.totp, window: 1 }) === null) {
+            await audit({
+              usuarioId: usuario!.id,
+              cantinaId: usuario!.cantinaId ?? undefined,
+              evento:    AuditEvent.LOGIN_FAIL,
+              datos:     { email: credentials.email, razon: "totp_invalido" },
+            });
+            throw new Error("mfa_invalid");
+          }
         }
 
         await audit({

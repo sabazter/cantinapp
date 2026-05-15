@@ -18,6 +18,31 @@ Registro de todos los cambios realizados y planificados, más la documentación 
 
 ## Historial de Cambios
 
+### [2026-05-15] Sprint 1.1 — Autenticación y Gestión de Usuarios completo
+**Tipo:** feat  
+**Módulos:** Auth, Usuarios, MFA, Layout  
+**Archivos creados/modificados:**
+- `src/components/shared/app-sidebar.tsx` — sidebar compartido con nav por rol, cerrar sesión y "cerrar todas las sesiones"
+- `src/app/(admin)/layout.tsx`, `(vendedor)/layout.tsx`, `(representante)/layout.tsx`, `(directivo)/layout.tsx` — layouts por rol con verificación de sesión
+- `src/app/(admin)/admin/dashboard/page.tsx` — dashboard admin con cards de métricas (placeholder)
+- `src/app/(vendedor)/caja/page.tsx`, `(representante)/portal/page.tsx`, `(directivo)/reportes/page.tsx` — stubs por rol
+- `src/app/(admin)/admin/usuarios/page.tsx` + `usuarios-client.tsx` — gestión de usuarios: tabla con badge de rol/MFA/estado, modales crear/editar/cambiar-contraseña/desactivar
+- `src/app/api/admin/usuarios/route.ts` — GET (list) + POST (create, bcrypt cost 12)
+- `src/app/api/admin/usuarios/[id]/route.ts` — PUT (edit) + DELETE (soft deactivate + revoke tokens)
+- `src/app/(admin)/admin/configuracion/mfa/page.tsx` + `mfa-setup-client.tsx` — setup MFA con QR, activación y desactivación
+- `src/app/api/auth/mfa/route.ts` — GET (generar secret+QR) / POST (verificar+activar) / DELETE (desactivar)
+- `src/app/login/login-form.tsx` — flujo de 2 pasos: credenciales → TOTP si MFA activo; link "¿Olvidaste tu contraseña?"
+- `src/lib/auth.ts` — campo `totp` en credentials, verificación TOTP en authorize con otpauth
+- `src/lib/require-role.ts` — reescrito: `requireRole(session, ...roles)`, `withAuth` inyecta sesión y captura ValidationError
+- `src/app/api/auth/sesiones/route.ts` — DELETE: revoca todos los refresh tokens del usuario
+- `src/app/api/auth/recuperar-password/route.ts` — POST: genera token SHA-256, envía email via Resend (o loguea en dev)
+- `src/app/api/auth/recuperar-password/nueva/route.ts` — POST: valida token, bcrypt nueva contraseña, revoca sesiones
+- `src/app/recuperar-password/page.tsx` — formulario solicitar reset
+- `src/app/recuperar-password/nueva/page.tsx` — formulario nueva contraseña con token en URL
+- `prisma/migrations/20260515000001_password_reset_tokens/` — tabla `password_reset_tokens` aplicada via Supabase MCP
+
+**Descripción:** Sprint 1.1 completo. Todos los roles redirigen al dashboard correcto post-login. Sidebar muestra navegación por rol. Admin puede crear/editar/desactivar usuarios y cambiar contraseñas. MFA TOTP integrado en el flujo de login (paso 2 automático si está habilitado) con página de setup y QR. Reset de contraseña via token SHA-256 uso-único, exp. 15 min, con email Resend o log en dev.
+
 ### [2026-05-15] Reemplazar Vercel por Docker
 **Tipo:** chore  
 **Módulo:** Infraestructura  
