@@ -18,6 +18,30 @@ Registro de todos los cambios realizados y planificados, más la documentación 
 
 ## Historial de Cambios
 
+### [2026-05-15] Integración de especificaciones de Seguridad & CRM al roadmap
+**Tipo:** docs  
+**Módulo:** Documentación / Planificación  
+**Archivos modificados:**
+- `CantinApp_Seguridad_y_CRM.md` — nuevo documento fuente (agregado al repo)
+- `ROADMAP.md` — reestructurado completamente para integrar seguridad y CRM
+- `CLAUDE.md` — sección de seguridad expandida con todas las reglas del nuevo spec
+
+**Descripción:**  
+Se incorporó el documento `CantinApp_Seguridad_y_CRM.md` como especificación obligatoria. El roadmap fue reescrito para reflejar sus requerimientos:
+
+- **Fase 0.5 nueva (bloqueante):** 19 tareas de seguridad fundacional antes de cualquier endpoint de negocio. Incluye JWT RS256, refresh tokens con rotación, auto-logout, bloqueo por intentos fallidos, rate limiting, Zod, headers HTTP, audit log, y soft delete.
+- **Fase Pre-Producción nueva (bloqueante):** 30-ítem checklist que debe completarse antes del primer despliegue con usuarios reales.
+- **Fase 4 nueva — CRM:** 5 sprints con perfil 360° de alumnos, segmentación dinámica, perfil del representante, dashboard CRM con alertas inteligentes, análisis de comportamiento por alumno/producto/sección/vendedor, y 7 tipos de reportes exportables.
+- **Todos los sprints existentes** reciben tareas de seguridad transversales: aislamiento multi-tenant, Zod validation, audit logs, cifrado de datos sensibles.
+
+**Notas técnicas:**
+- JWT debe cambiar de HS256 a RS256 (requiere par de claves RSA en env vars)
+- Se añaden nuevas variables de entorno: `NEXTAUTH_PRIVATE_KEY`, `NEXTAUTH_PUBLIC_KEY`, `INTERNAL_API_KEY`, `ENCRYPTION_KEY`, `UPSTASH_REDIS_REST_URL`
+- El schema de Prisma necesitará dos tablas nuevas: `refresh_tokens` y `audit_logs`
+- Zod y `@upstash/ratelimit` + `@upstash/redis` se instalan en Fase 0.5
+
+---
+
 ### [2026-05-15] Documentación inicial del proyecto
 **Tipo:** docs  
 **Módulo:** — (proyecto base)  

@@ -78,13 +78,51 @@ Especificación completa: `CantinApp_Especificacion_Tecnica (1).md`
 ---
 
 ## Seguridad (Reglas no negociables)
+**Ref completa:** `CantinApp_Seguridad_y_CRM.md`
 
-- Nunca exponer claves API en el frontend
-- Validar roles en cada API Route con middleware
-- Los representantes solo acceden a datos de sus propios hijos (RLS en Supabase)
-- Logs de auditoría para toda operación financiera
-- Inputs sanitizados antes de queries (Prisma protege contra SQL injection)
-- HTTPS obligatorio en producción
+### Autenticación
+- JWT RS256 (no HS256) — par de claves RSA en variables de entorno
+- Access token: 15 min. Refresh token: 7 días, cookie HttpOnly + SameSite=Strict
+- bcrypt cost factor mínimo 12 — nunca MD5, SHA1 ni SHA256 directo
+- MFA TOTP obligatorio para rol `admin`
+- Auto-logout: 10 min vendedor / 30 min admin
+- Bloqueo tras 5 intentos fallidos (15 min); permanente a los 20
+
+### Autorización
+- `cantina_id` **siempre del JWT verificado**, nunca del body del request
+- Usar helper `requireRole(...roles)` en todos los endpoints protegidos
+- Representantes solo acceden a datos de sus propios hijos (validar `representante_id` en cada query)
+- Nunca exponer si un recurso existe en errores 403 (solo "Sin permisos")
+
+### Validación
+- Zod en **todos** los endpoints de escritura — rechazar sin Zod
+- Tamaño máx. de body: 1 MB (fotos: 5 MB)
+- Archivos subidos: solo jpg, png, webp
+- Sanitizar HTML en campos de texto libre
+
+### Datos sensibles
+- Cédulas de alumnos: AES-256-GCM antes de guardar en DB
+- Referencias bancarias: AES-256-GCM antes de guardar en DB
+- Fotos de alumnos: bucket privado Supabase, URLs firmadas exp. 1h
+- Refresh tokens: SHA-256 hash antes de almacenar
+- **Soft delete** en tablas financieras — nunca `.delete()` en ventas/abonos/movimientos
+
+### API
+- Rate limiting en login (10 req/min/IP) y global (300 req/min/IP)
+- Headers HTTP de seguridad en `next.config.mjs` (CSP, HSTS, X-Frame)
+- CORS: solo dominios autorizados, nunca wildcard en producción
+- Nunca exponer stack traces al cliente
+- Endpoint BCV `/internal/...`: solo localhost + `INTERNAL_API_KEY`
+
+### Auditoría
+- Función `audit(event, data)` para loguear toda operación financiera
+- Loguear: userId, IP, timestamp, cantina_id — **nunca** contraseñas ni datos sensibles
+- Tabla `audit_logs` inmutable (sin UPDATE/DELETE)
+
+### Menores de edad
+- Foto del alumno: opcional, nunca obligatoria
+- Eliminar foto del storage cuando se da de baja al alumno
+- Registrar consentimiento del representante con fecha, hora e IP
 
 ---
 
@@ -95,7 +133,15 @@ DATABASE_URL=
 DIRECT_URL=
 NEXTAUTH_URL=
 NEXTAUTH_SECRET=
+# RS256 — generar con: openssl genrsa -out private.pem 2048
+NEXTAUTH_PRIVATE_KEY=
+NEXTAUTH_PUBLIC_KEY=
+INTERNAL_API_KEY=
+ENCRYPTION_KEY=          # AES-256-GCM, 32 bytes en hex
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
 RESEND_API_KEY=
+RESEND_FROM=
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_WHATSAPP_FROM=
