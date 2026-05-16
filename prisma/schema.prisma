@@ -57,6 +57,7 @@ model Usuario {
   mfaSecret        String?        @map("mfa_secret")
   mfaHabilitado    Boolean        @default(false) @map("mfa_habilitado")
   emailVerificado  Boolean        @default(false) @map("email_verificado")
+  notasCrm         String?        @map("notas_crm")
   createdAt        DateTime       @default(now()) @map("created_at")
   updatedAt        DateTime       @updatedAt @map("updated_at")
 

@@ -19,6 +19,7 @@ import {
   Building2,
   Shield,
   ClipboardList,
+  UserCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -39,6 +40,7 @@ const NAV_ITEMS: Record<string, NavItem[]> = {
     { label: "Inventario", href: "/admin/inventario",  icon: Package },
     { label: "Alumnos",    href: "/admin/alumnos",     icon: GraduationCap },
     { label: "Abonos",     href: "/admin/abonos",      icon: Wallet },
+    { label: "CRM",         href: "/admin/crm/dashboard", icon: UserCheck },
     { label: "Usuarios",   href: "/admin/usuarios",    icon: Users },
     { label: "Reportes",   href: "/admin/reportes",    icon: BarChart3 },
     { label: "Config.",    href: "/admin/configuracion", icon: Settings },

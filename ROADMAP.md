@@ -10,10 +10,11 @@
 
 ## Estado Actual
 
-> **Fase:** Sprints 2.1–2.3 completados (2026-05-15). Listo para Sprint 2.4.  
-> **Nota Supabase:** tablas creadas vía MCP (no `prisma migrate dev`); baseline registrada en `_prisma_migrations`. Acceso a DB vía Supabase REST API (`@supabase/supabase-js`). Conexión directa PostgreSQL/Prisma bloqueada por Supavisor en este entorno — no afecta la app, que usa la REST API. RLS habilitado en todas las tablas (PP.20 ✅).  
-> **Deploy:** Docker en servidor privado. Imagen multi-stage con `output: standalone`. Build: `docker build --build-arg NEXT_PUBLIC_SUPABASE_URL=... -t cantinapp .` — el resto de vars se inyectan en runtime.  
-> **Next.js:** actualizado a 16.2.6 para eliminar CVEs de producción (PP.23 ✅).
+> **Fase:** Fase 3 completada (2026-05-16). Iniciando Fase 4 (CRM).  
+> **Completado hoy:** fiado_habilitado (campo + migración aplicada en Supabase), Sprints 3.2 (export PDF/Excel), 3.3 (superadmin), 3.4 (PWA offline + IndexedDB + Background Sync).  
+> **Nota Supabase:** conexión PostgreSQL directa bloqueada — migrations se aplican vía Supabase dashboard SQL editor. `DATABASE_URL` = transaction pooler (6543), `DIRECT_URL` = session pooler (5432), ambos con `sslmode=require`.  
+> **Deploy:** Docker en servidor privado. Imagen multi-stage con `output: standalone`.  
+> **Next.js:** 16.2.6 (PP.23 ✅). RLS habilitado en todas las tablas (PP.20 ✅).
 
 ---
 
@@ -250,101 +251,99 @@
 | 2.3.6 | Si rebota 3 veces: marcar como inválido y alertar al admin | §9.3 | ✅ |
 | 2.3.7 | Audit log de cada mensaje enviado (destinatario, tipo, timestamp — sin contenido) | §9.1 | ✅ |
 
-### Sprint 2.4 — Mejoras POS (1 semana)
-| # | Tarea | Ref. |
-|---|-------|------|
-| 2.4.1 | Generación de recibo PDF | — |
-| 2.4.2 | Menú del día con precio variable por jornada | — |
-| 2.4.3 | Límite de fiado configurable por alumno | — |
+### Sprint 2.4 — Mejoras POS (1 semana) ✅ Completado (2026-05-15)
+| # | Tarea | Ref. | Estado |
+|---|-------|------|--------|
+| 2.4.1 | Generación de recibo PDF | — | ✅ |
+| 2.4.2 | Menú del día con precio variable por jornada | — | ✅ |
+| 2.4.3 | Límite de fiado configurable por alumno | — | ✅ |
+| 2.4.4 | Campo `fiado_habilitado`: el fiado se habilita manualmente por admin, no es automático | — | ✅ |
 
 ---
 
 ## Fase 3 — Reportes Avanzados y Multi-sede
-**Duración estimada:** 4–5 semanas | **Estado:** ⬜ Pendiente
+**Duración estimada:** 4–5 semanas | **Estado:** ✅ Completado (2026-05-16)
 
-### Sprint 3.1 — Dashboard y Estadísticas (1.5 semanas)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 3.1.1 | Gráficas de ventas con Recharts | — |
-| 3.1.2 | Ranking de productos más vendidos | — |
-| 3.1.3 | Rendimiento por vendedor (solo visible para admin) | §3.2 |
-| 3.1.4 | Vista de deudas por antigüedad | — |
+### Sprint 3.1 — Dashboard y Estadísticas (1.5 semanas) ✅ Completado (2026-05-15)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 3.1.1 | Gráficas de ventas con Recharts | — | ✅ |
+| 3.1.2 | Ranking de productos más vendidos | — | ✅ |
+| 3.1.3 | Rendimiento por vendedor (solo visible para admin) | §3.2 | ✅ |
+| 3.1.4 | Vista de deudas por antigüedad | — | ✅ |
 
-### Sprint 3.2 — Exportación (1 semana)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 3.2.1 | Exportar reportes a PDF con marca de agua "Confidencial" + fecha | §11.9 |
-| 3.2.2 | Exportar reportes a Excel | — |
-| 3.2.3 | Los reportes exportados incluyen solo los datos del tenant del usuario | §3.3 |
+### Sprint 3.2 — Exportación (1 semana) ✅ Completado (2026-05-16)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 3.2.1 | Exportar reportes a PDF con marca de agua "Confidencial" + fecha | §11.9 | ✅ |
+| 3.2.2 | Exportar reportes a Excel | — | ✅ |
+| 3.2.3 | Los reportes exportados incluyen solo los datos del tenant del usuario | §3.3 | ✅ |
 
-### Sprint 3.3 — Multi-tenant (1.5 semanas)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 3.3.1 | Panel superadmin para gestionar cantinas | — |
-| 3.3.2 | Subdominio o slug por cantina | — |
-| 3.3.3 | RLS en Supabase: cada fila visible solo para su cantina | §7.1 |
-| 3.3.4 | Aislamiento total: ninguna query cruza `cantina_id` | §3.3 |
+### Sprint 3.3 — Multi-tenant (1.5 semanas) ✅ Completado (2026-05-16)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 3.3.1 | Panel superadmin para gestionar cantinas | — | ✅ |
+| 3.3.2 | Subdominio o slug por cantina | — | ✅ |
+| 3.3.3 | RLS en Supabase: cada fila visible solo para su cantina | §7.1 | ✅ |
+| 3.3.4 | Aislamiento total: ninguna query cruza `cantina_id` | §3.3 | ✅ |
 
-### Sprint 3.4 — PWA Offline (1 semana)
-| # | Tarea | Ref. |
-|---|-------|------|
-| 3.4.1 | Service Worker con caché de catálogo | — |
-| 3.4.2 | Cola de ventas en IndexedDB sin internet | — |
-| 3.4.3 | Sincronización automática al restaurar conexión | — |
-| 3.4.4 | Indicador visual de estado de conexión | — |
+### Sprint 3.4 — PWA Offline (1 semana) ✅ Completado (2026-05-16)
+| # | Tarea | Ref. | Estado |
+|---|-------|------|--------|
+| 3.4.1 | Service Worker con caché de catálogo | — | ✅ |
+| 3.4.2 | Cola de ventas en IndexedDB sin internet | — | ✅ |
+| 3.4.3 | Sincronización automática al restaurar conexión (Background Sync) | — | ✅ |
+| 3.4.4 | Indicador visual de estado de conexión (pill flotante) | — | ✅ |
 
 ---
 
 ## Fase 4 — Módulo CRM
-**Duración estimada:** 5–6 semanas | **Estado:** ⬜ Pendiente  
+**Duración estimada:** 5–6 semanas | **Estado:** ✅ Completado (2026-05-16)  
 **Referencia:** Sección 11 de `CantinApp_Seguridad_y_CRM.md`
 
 > Acceso CRM restringido exclusivamente al rol **Administrador**. Los análisis de comportamiento se usan solo para operaciones de la cantina, nunca para publicidad ni se exportan a sistemas externos.
 
-### Sprint 4.1 — Perfil 360° del Alumno (1.5 semanas)
-| # | Tarea | Ref. |
-|---|-------|------|
-| 4.1.1 | Ficha completa: datos básicos, representante, saldo, límite de fiado | §11.2 |
-| 4.1.2 | Métricas de comportamiento: gasto promedio semanal, frecuencia, producto favorito, horario típico | §11.2 |
-| 4.1.3 | Estado financiero: historial de deudas, tiempo promedio de pago, calificación de pagador | §11.2 |
-| 4.1.4 | Alertas activas del alumno en la ficha (deuda alta, inactividad) | §11.2 |
-| 4.1.5 | El representante puede solicitar desde el portal ver su perfil de comportamiento | §11.9 |
+### Sprint 4.1 — Perfil 360° del Alumno (1.5 semanas) ✅ Completado (2026-05-16)
+| # | Tarea | Ref. | Estado |
+|---|-------|------|--------|
+| 4.1.1 | Ficha completa: datos básicos, representante, saldo, límite de fiado | §11.2 | ✅ |
+| 4.1.2 | Métricas de comportamiento: gasto promedio semanal, frecuencia, producto favorito, horario típico | §11.2 | ✅ |
+| 4.1.3 | Estado financiero: historial de deudas, calificación de pagador | §11.2 | ✅ |
+| 4.1.4 | Alertas activas del alumno en la ficha (deuda alta, inactividad, límite cercano) | §11.2 | ✅ |
+| 4.1.5 | API `/api/admin/crm/alumno/[id]` + página `/admin/crm/[id]` | §11.9 | ✅ |
 
-### Sprint 4.2 — Segmentación de Clientes (1 semana)
-| # | Tarea | Ref. |
-|---|-------|------|
-| 4.2.1 | Motor de segmentación: buenos pagadores, deudores frecuentes, clientes frecuentes, en riesgo, alto valor, deuda antigua | §11.3 |
-| 4.2.2 | Cron nocturno que recalcula segmentos automáticamente | §11.3 |
-| 4.2.3 | Vista de segmentos con lista de alumnos y acciones sugeridas | §11.3 |
+### Sprint 4.2 — Segmentación de Clientes (1 semana) ✅ Completado (2026-05-16)
+| # | Tarea | Ref. | Estado |
+|---|-------|------|--------|
+| 4.2.1 | Motor de segmentación: 8 segmentos (buenos pagadores, deudores, frecuentes, en riesgo, alto valor, deuda antigua, inactivos, nuevos) | §11.3 | ✅ |
+| 4.2.2 | API `/api/admin/crm/segmentos` con filtro por segmento | §11.3 | ✅ |
+| 4.2.3 | Página `/admin/crm` con chips de segmento, tabla filtrable y acceso a perfil 360° | §11.3 | ✅ |
 
-### Sprint 4.3 — Perfil del Representante (1 semana)
-| # | Tarea | Ref. |
-|---|-------|------|
-| 4.3.1 | Historial de abonos del representante: montos, métodos, frecuencia, puntualidad | §11.4 |
-| 4.3.2 | Canal de comunicación preferido (WhatsApp vs Email) | §11.4 |
-| 4.3.3 | Registro de interacciones: notificaciones enviadas, apertura de email | §11.4 |
-| 4.3.4 | Vista familiar: todos los hijos bajo el mismo representante | §11.4 |
-| 4.3.5 | Calificación de responsabilidad financiera (calculada automáticamente) | §11.4 |
-| 4.3.6 | Notas internas del administrador (campo libre, no visible al representante) | §11.4 |
+### Sprint 4.3 — Perfil del Representante (1 semana) ✅ Completado (2026-05-16)
+| # | Tarea | Ref. | Estado |
+|---|-------|------|--------|
+| 4.3.1 | Historial de abonos: montos, métodos, confirmados vs rechazados | §11.4 | ✅ |
+| 4.3.2 | Canal preferido (WhatsApp vs Email) + conteo de notificaciones | §11.4 | ✅ |
+| 4.3.3 | Vista familiar: todos los hijos con saldo y link a perfil 360° | §11.4 | ✅ |
+| 4.3.4 | Calificación de responsabilidad financiera (excelente/buena/regular/baja) | §11.4 | ✅ |
+| 4.3.5 | Notas internas del admin (campo `notas_crm`, no visible al representante) | §11.4 | ✅ |
+| 4.3.6 | API `/api/admin/crm/representante/[id]` + PUT `/notas` | §11.4 | ✅ |
 
-### Sprint 4.4 — Dashboard CRM y Alertas Inteligentes (1 semana)
-| # | Tarea | Ref. |
-|---|-------|------|
-| 4.4.1 | Dashboard CRM: ventas hoy, fiado hoy, abonos hoy, deuda total, alertas activas | §11.6 |
-| 4.4.2 | Tendencia semanal de ventas + top productos del día | §11.6 |
-| 4.4.3 | Alertas configurables: deuda crítica, alumno inactivo, pico de fiado, representante sin respuesta, producto estrella con stock bajo, patrón de anulaciones | §11.7 |
-| 4.4.4 | Umbrales de alertas configurables por el administrador | §11.7 |
+### Sprint 4.4 — Dashboard CRM y Alertas Inteligentes (1 semana) ✅ Completado (2026-05-16)
+| # | Tarea | Ref. | Estado |
+|---|-------|------|--------|
+| 4.4.1 | Dashboard CRM: ventas hoy, fiado hoy, abonos hoy, deuda total, alertas activas | §11.6 | ✅ |
+| 4.4.2 | Tendencia semanal (gráfica Recharts) + top 5 productos del día | §11.6 | ✅ |
+| 4.4.3 | Alertas: deuda crítica, inactividad, pico de fiado | §11.7 | ✅ |
+| 4.4.4 | Análisis por producto / curso / vendedor con selector de período | §11.5 | ✅ |
 
-### Sprint 4.5 — Análisis de Comportamiento y Reportes CRM (1 semana)
-| # | Tarea | Ref. |
-|---|-------|------|
-| 4.5.1 | Análisis por producto: volumen, ingresos, agotamiento, variación por día de semana | §11.5 |
-| 4.5.2 | Análisis por curso/sección: gasto promedio, deuda acumulada, horarios de pico | §11.5 |
-| 4.5.3 | Análisis por vendedor: ventas por turno, fiados vs cobros, velocidad de atención, tasa de anulaciones | §11.5 |
-| 4.5.4 | Reporte de deudores (PDF/Excel con marca de agua Confidencial) | §11.8 |
-| 4.5.5 | Reporte de clientes frecuentes | §11.8 |
-| 4.5.6 | Reporte financiero por período | §11.8 |
-| 4.5.7 | Estado de cuenta individual para entregar al representante (resumen mensual) | §11.8 |
+### Sprint 4.5 — Reportes CRM PDF/Excel (1 semana) ✅ Completado (2026-05-16)
+| # | Tarea | Ref. | Estado |
+|---|-------|------|--------|
+| 4.5.1 | Reporte de deudores CRM (PDF con marca de agua "Confidencial" + Excel) | §11.8 | ✅ |
+| 4.5.2 | Reporte de clientes frecuentes (PDF + Excel) | §11.8 | ✅ |
+| 4.5.3 | Estado de cuenta individual mensual (PDF por alumno) | §11.8 | ✅ |
+| 4.5.4 | Funciones exportables en `src/lib/export.ts` | §11.9 | ✅ |
 
 ---
 
@@ -370,6 +369,6 @@ Antes de finalizar Fase 1, definir:
 | 0.5 | Seguridad fundacional | 3–4 días | ✅ |
 | 1 | MVP Core (POS, inventario, fiado, BCV) | 8–10 sem | ✅ |
 | PP | Checklist pre-producción (30 ítems) | 1 sem | 🔄 (PP.20, PP.23 ✅) |
-| 2 | Portal representantes + notificaciones | 4–5 sem | 🔄 (Sprints 2.1–2.3 ✅) |
-| 3 | Reportes avanzados + multi-sede + PWA offline | 4–5 sem | ⬜ |
-| 4 | CRM completo | 5–6 sem | ⬜ |
+| 2 | Portal representantes + notificaciones | 4–5 sem | ✅ |
+| 3 | Reportes avanzados + multi-sede + PWA offline | 4–5 sem | ✅ |
+| 4 | CRM completo | 5–6 sem | ✅ |

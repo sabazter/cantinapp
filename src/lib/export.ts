@@ -196,3 +196,156 @@ export function exportDeudasExcel(deudores: DeudorRow[]) {
   XLSX.utils.book_append_sheet(wb, ws, "Deudas");
   xlsxDownload(wb, "cantinapp_deudas.xlsx");
 }
+
+// ── CRM: Deudores (con marca de agua Confidencial) ────────────────────────────
+
+interface DeudorCrm {
+  nombre: string; curso: string; seccion: string | null;
+  saldo: number; diasSinComprar: number; segmento: string;
+}
+
+export function exportDeudoresCrmPdf(deudores: DeudorCrm[]) {
+  const total = deudores.reduce((s, d) => s + Math.abs(d.saldo), 0);
+  const doc = pdfBase("Reporte de Deudores CRM", `${deudores.length} alumnos · Deuda total: $${total.toFixed(2)} USD`);
+
+  // Marca de agua
+  doc.setFontSize(52);
+  doc.setTextColor(220, 220, 220);
+  doc.saveGraphicsState();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (doc as any).setGState((doc as any).GState({ opacity: 0.15 }));
+  doc.text("CONFIDENCIAL", 105, 155, { align: "center", angle: 45 });
+  doc.restoreGraphicsState();
+  doc.setTextColor(30, 30, 30);
+
+  autoTable(doc, {
+    startY: 32,
+    head: [["Alumno", "Curso", "Sección", "Deuda USD", "Días sin comprar", "Segmento"]],
+    body: deudores.map(d => [
+      d.nombre,
+      d.curso,
+      d.seccion ?? "—",
+      `$${Math.abs(d.saldo).toFixed(2)}`,
+      d.diasSinComprar >= 999 ? "+90" : `${d.diasSinComprar}d`,
+      d.segmento.replace(/_/g, " "),
+    ]),
+    headStyles: { fillColor: [239, 68, 68], fontSize: 9 },
+    bodyStyles: { fontSize: 8 },
+    alternateRowStyles: { fillColor: [255, 245, 245] },
+    columnStyles: {
+      3: { halign: "right", textColor: [180, 20, 20] },
+      4: { halign: "right" },
+    },
+  });
+
+  doc.save(`cantinapp_crm_deudores_${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+export function exportDeudoresCrmExcel(deudores: DeudorCrm[]) {
+  const rows = deudores.map(d => ({
+    Alumno: d.nombre,
+    Curso: d.curso,
+    Sección: d.seccion ?? "",
+    "Deuda USD": Math.abs(d.saldo),
+    "Días sin comprar": d.diasSinComprar >= 999 ? 90 : d.diasSinComprar,
+    Segmento: d.segmento.replace(/_/g, " "),
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws["!cols"] = [{ wch: 30 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 18 }, { wch: 20 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Deudores CRM");
+  xlsxDownload(wb, `cantinapp_crm_deudores_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// ── CRM: Estado de cuenta individual ─────────────────────────────────────────
+
+interface EstadoCuentaItem {
+  fecha: string; descripcion: string; montoUsd: number; tipo: "compra" | "abono";
+}
+
+export function exportEstadoCuentaPdf(
+  alumno: { nombre: string; curso: string; saldo: number },
+  items: EstadoCuentaItem[],
+  mes: string,
+) {
+  const doc = pdfBase(
+    "Estado de Cuenta",
+    `${alumno.nombre} · ${alumno.curso} · ${mes}`,
+  );
+
+  autoTable(doc, {
+    startY: 32,
+    head: [["Fecha", "Descripción", "Compra USD", "Abono USD", "Saldo"]],
+    body: (() => {
+      let saldo = 0;
+      return items.map(it => {
+        if (it.tipo === "abono") saldo += it.montoUsd;
+        else saldo -= it.montoUsd;
+        return [
+          new Date(it.fecha).toLocaleDateString("es-VE"),
+          it.descripcion,
+          it.tipo === "compra" ? `$${it.montoUsd.toFixed(2)}` : "",
+          it.tipo === "abono"  ? `$${it.montoUsd.toFixed(2)}` : "",
+          `$${saldo.toFixed(2)}`,
+        ];
+      });
+    })(),
+    headStyles: { fillColor: [59, 130, 246], fontSize: 9 },
+    bodyStyles: { fontSize: 8 },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    columnStyles: {
+      2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" },
+    },
+  });
+
+  // Saldo final
+  const finalY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? 200;
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text(`Saldo al cierre: $${alumno.saldo.toFixed(2)} USD`, 14, finalY + 8);
+
+  doc.save(`cantinapp_estado_cuenta_${alumno.nombre.replace(/ /g, "_")}_${mes}.pdf`);
+}
+
+// ── CRM: Clientes frecuentes ──────────────────────────────────────────────────
+
+interface ClienteFrecuente {
+  nombre: string; curso: string; totalVentas: number;
+  gastoTotalUsd: number; diasSinComprar: number;
+}
+
+export function exportClientesFrecuentesPdf(clientes: ClienteFrecuente[], dias: number) {
+  const doc = pdfBase(
+    "Clientes Frecuentes",
+    `Top compradores en los últimos ${dias} días`,
+  );
+
+  autoTable(doc, {
+    startY: 32,
+    head: [["Alumno", "Curso", "Compras", "Gasto total USD", "Días sin comprar"]],
+    body: clientes.map(c => [
+      c.nombre, c.curso, c.totalVentas,
+      `$${c.gastoTotalUsd.toFixed(2)}`,
+      c.diasSinComprar >= 999 ? "Nunca" : `${c.diasSinComprar}d`,
+    ]),
+    headStyles: { fillColor: [139, 92, 246], fontSize: 9 },
+    bodyStyles: { fontSize: 8 },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
+  });
+
+  doc.save(`cantinapp_crm_frecuentes_${dias}d.pdf`);
+}
+
+export function exportClientesFrecuentesExcel(clientes: ClienteFrecuente[], dias: number) {
+  const rows = clientes.map(c => ({
+    Alumno: c.nombre, Curso: c.curso, Compras: c.totalVentas,
+    "Gasto total USD": c.gastoTotalUsd,
+    "Días sin comprar": c.diasSinComprar >= 999 ? 90 : c.diasSinComprar,
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws["!cols"] = [{ wch: 30 }, { wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 18 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Clientes frecuentes");
+  xlsxDownload(wb, `cantinapp_crm_frecuentes_${dias}d.xlsx`);
+}
