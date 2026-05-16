@@ -8,13 +8,19 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Loader2 } from "lucide-react";
+import { Loader2, FileDown, FileSpreadsheet } from "lucide-react";
+import {
+  exportProductosPdf, exportProductosExcel,
+  exportVendedoresPdf, exportVendedoresExcel,
+  exportDeudasPdf, exportDeudasExcel,
+} from "@/lib/export";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -51,6 +57,12 @@ interface DeudasData {
 const fmtUsd  = (n: number) => `$${n.toFixed(2)}`;
 const COLORES  = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
 
+const DIAS_LABEL: Record<string, string> = {
+  "7":  "últimos 7 días",
+  "30": "últimos 30 días",
+  "90": "últimos 90 días",
+};
+
 function Spinner() {
   return (
     <div className="flex justify-center items-center py-16 text-muted-foreground gap-2">
@@ -75,6 +87,39 @@ function PeriodoSelect({ value, onChange }: { value: string; onChange: (v: strin
   );
 }
 
+function ExportButtons({
+  onPdf, onExcel, disabled,
+}: {
+  onPdf: () => void;
+  onExcel: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onPdf}
+        disabled={disabled}
+        className="h-8 gap-1.5 text-xs"
+      >
+        <FileDown className="h-3.5 w-3.5" />
+        PDF
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onExcel}
+        disabled={disabled}
+        className="h-8 gap-1.5 text-xs"
+      >
+        <FileSpreadsheet className="h-3.5 w-3.5" />
+        Excel
+      </Button>
+    </div>
+  );
+}
+
 // ── Pestaña Productos ──────────────────────────────────────────────────────────
 
 function TabProductos() {
@@ -92,12 +137,20 @@ function TabProductos() {
   useEffect(() => { load(dias); }, [dias, load]);
 
   const top10 = data.slice(0, 10);
+  const label = DIAS_LABEL[dias] ?? dias;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-base font-semibold">Ranking de productos</h2>
-        <PeriodoSelect value={dias} onChange={v => { setDias(v); }} />
+        <div className="flex items-center gap-2">
+          <PeriodoSelect value={dias} onChange={v => { setDias(v); }} />
+          <ExportButtons
+            disabled={loading || data.length === 0}
+            onPdf={() => exportProductosPdf(data, label)}
+            onExcel={() => exportProductosExcel(data, label)}
+          />
+        </div>
       </div>
 
       {loading ? <Spinner /> : data.length === 0 ? (
@@ -192,11 +245,20 @@ function TabVendedores() {
 
   useEffect(() => { load(dias); }, [dias, load]);
 
+  const label = DIAS_LABEL[dias] ?? dias;
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-base font-semibold">Rendimiento por vendedor</h2>
-        <PeriodoSelect value={dias} onChange={setDias} />
+        <div className="flex items-center gap-2">
+          <PeriodoSelect value={dias} onChange={setDias} />
+          <ExportButtons
+            disabled={loading || data.length === 0}
+            onPdf={() => exportVendedoresPdf(data, label)}
+            onExcel={() => exportVendedoresExcel(data, label)}
+          />
+        </div>
       </div>
 
       {loading ? <Spinner /> : data.length === 0 ? (
@@ -302,7 +364,14 @@ function TabDeudas() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-base font-semibold">Deudas por antigüedad</h2>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h2 className="text-base font-semibold">Deudas por antigüedad</h2>
+        <ExportButtons
+          disabled={data.deudores.length === 0}
+          onPdf={() => exportDeudasPdf(data.deudores)}
+          onExcel={() => exportDeudasExcel(data.deudores)}
+        />
+      </div>
 
       {data.deudores.length === 0 ? (
         <div className="flex flex-col items-center py-16 text-muted-foreground gap-2">

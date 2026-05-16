@@ -16,6 +16,8 @@ import {
   ShieldOff,
   ChefHat,
   Wallet,
+  Building2,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -41,13 +43,8 @@ const NAV_ITEMS: Record<string, NavItem[]> = {
     { label: "Config.",    href: "/admin/configuracion", icon: Settings },
   ],
   superadmin: [
-    { label: "Dashboard",  href: "/admin/dashboard",   icon: LayoutDashboard },
-    { label: "Inventario", href: "/admin/inventario",  icon: Package },
-    { label: "Alumnos",    href: "/admin/alumnos",     icon: GraduationCap },
-    { label: "Abonos",     href: "/admin/abonos",      icon: Wallet },
-    { label: "Usuarios",   href: "/admin/usuarios",    icon: Users },
-    { label: "Reportes",   href: "/admin/reportes",    icon: BarChart3 },
-    { label: "Config.",    href: "/admin/configuracion", icon: Settings },
+    { label: "Panel global",  href: "/superadmin/dashboard", icon: Shield },
+    { label: "Cantinas",      href: "/superadmin/cantinas",  icon: Building2 },
   ],
   vendedor: [
     { label: "Caja",   href: "/caja",   icon: ShoppingCart },

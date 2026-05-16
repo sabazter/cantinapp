@@ -6,6 +6,14 @@ const nextConfig = {
   },
   headers: async () => [
     {
+      // Service worker sin caché para que se actualice inmediatamente
+      source: "/sw.js",
+      headers: [
+        { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
+        { key: "Service-Worker-Allowed", value: "/" },
+      ],
+    },
+    {
       source: "/(.*)",
       headers: [
         { key: "X-Frame-Options", value: "DENY" },

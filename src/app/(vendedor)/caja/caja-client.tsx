@@ -15,8 +15,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Minus, Plus, Trash2, Search, ShoppingCart, User, Loader2, CheckCircle2, Download,
+  Minus, Plus, Trash2, Search, ShoppingCart, User, Loader2, CheckCircle2, Download, WifiOff,
 } from "lucide-react";
+import { encolarVenta } from "@/lib/idb";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -178,16 +179,40 @@ export function CajaClient() {
     setProcessing(true);
     setError(null);
 
+    const payload = {
+      alumnoId:   selectedAlumno?.id,
+      metodoPago,
+      referencia: referencia || undefined,
+      items:      carrito.map(i => ({ productoId: i.id, cantidad: i.cantidad })),
+    };
+
+    // Sin conexión: encolar en IndexedDB
+    if (!navigator.onLine) {
+      await encolarVenta(payload);
+      setLastRecibo({
+        id:           `OFFLINE-${Date.now()}`,
+        totalUsd,
+        totalBs:      totalBs ?? 0,
+        tasa:         tasa?.tasa ?? 0,
+        items:        carrito.map(i => ({ nombre: i.nombre, cantidad: i.cantidad, precioUsd: precioEfectivo(i) })),
+        alumnoNombre: selectedAlumno?.nombre ?? null,
+        metodoPago,
+        fecha:        new Date().toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }),
+      });
+      setCarrito([]);
+      setSelectedAlumno(null);
+      setAlumnoSearch("");
+      setReferencia("");
+      setSuccessModal(true);
+      setProcessing(false);
+      return;
+    }
+
     try {
       const res = await fetch("/api/ventas", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          alumnoId:   selectedAlumno?.id,
-          metodoPago,
-          referencia: referencia || undefined,
-          items:      carrito.map(i => ({ productoId: i.id, cantidad: i.cantidad })),
-        }),
+        body:    JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -553,12 +578,26 @@ export function CajaClient() {
         <DialogContent className="sm:max-w-sm text-center">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-green-600" />
-              Venta registrada
+              {lastRecibo?.id.startsWith("OFFLINE-") ? (
+                <>
+                  <WifiOff className="h-5 w-5 text-amber-600" />
+                  Venta guardada (sin conexión)
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  Venta registrada
+                </>
+              )}
             </DialogTitle>
           </DialogHeader>
           {lastRecibo && (
             <div className="space-y-3 py-2">
+              {lastRecibo.id.startsWith("OFFLINE-") && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                  La venta se enviará al servidor cuando se restablezca la conexión.
+                </p>
+              )}
               <div className="rounded-md border p-4 space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Total USD</span>
@@ -580,9 +619,11 @@ export function CajaClient() {
             </div>
           )}
           <DialogFooter className="flex-col gap-2">
-            <Button variant="outline" className="w-full gap-2" onClick={descargarPDF}>
-              <Download className="h-4 w-4" /> Descargar PDF
-            </Button>
+            {lastRecibo && !lastRecibo.id.startsWith("OFFLINE-") && (
+              <Button variant="outline" className="w-full gap-2" onClick={descargarPDF}>
+                <Download className="h-4 w-4" /> Descargar PDF
+              </Button>
+            )}
             <Button className="w-full" onClick={() => setSuccessModal(false)}>
               Nueva venta
             </Button>
