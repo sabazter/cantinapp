@@ -15,6 +15,7 @@ import {
   LogOut,
   ShieldOff,
   ChefHat,
+  Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -31,23 +32,26 @@ interface NavItem {
 
 const NAV_ITEMS: Record<string, NavItem[]> = {
   admin: [
-    { label: "Dashboard",  href: "/admin/dashboard", icon: LayoutDashboard },
-    { label: "Inventario", href: "/admin/inventario", icon: Package },
-    { label: "Alumnos",    href: "/admin/alumnos",    icon: GraduationCap },
-    { label: "Usuarios",   href: "/admin/usuarios",   icon: Users },
-    { label: "Reportes",   href: "/admin/reportes",   icon: BarChart3 },
+    { label: "Dashboard",  href: "/admin/dashboard",   icon: LayoutDashboard },
+    { label: "Inventario", href: "/admin/inventario",  icon: Package },
+    { label: "Alumnos",    href: "/admin/alumnos",     icon: GraduationCap },
+    { label: "Abonos",     href: "/admin/abonos",      icon: Wallet },
+    { label: "Usuarios",   href: "/admin/usuarios",    icon: Users },
+    { label: "Reportes",   href: "/admin/reportes",    icon: BarChart3 },
     { label: "Config.",    href: "/admin/configuracion", icon: Settings },
   ],
   superadmin: [
-    { label: "Dashboard",  href: "/admin/dashboard", icon: LayoutDashboard },
-    { label: "Inventario", href: "/admin/inventario", icon: Package },
-    { label: "Alumnos",    href: "/admin/alumnos",    icon: GraduationCap },
-    { label: "Usuarios",   href: "/admin/usuarios",   icon: Users },
-    { label: "Reportes",   href: "/admin/reportes",   icon: BarChart3 },
+    { label: "Dashboard",  href: "/admin/dashboard",   icon: LayoutDashboard },
+    { label: "Inventario", href: "/admin/inventario",  icon: Package },
+    { label: "Alumnos",    href: "/admin/alumnos",     icon: GraduationCap },
+    { label: "Abonos",     href: "/admin/abonos",      icon: Wallet },
+    { label: "Usuarios",   href: "/admin/usuarios",    icon: Users },
+    { label: "Reportes",   href: "/admin/reportes",    icon: BarChart3 },
     { label: "Config.",    href: "/admin/configuracion", icon: Settings },
   ],
   vendedor: [
-    { label: "Caja", href: "/caja", icon: ShoppingCart },
+    { label: "Caja",   href: "/caja",   icon: ShoppingCart },
+    { label: "Abonos", href: "/abonos", icon: Wallet },
   ],
   representante: [
     { label: "Mi portal", href: "/portal", icon: LayoutDashboard },

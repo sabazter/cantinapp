@@ -91,7 +91,7 @@
 ---
 
 ## Fase 1 — MVP Core
-**Duración estimada:** 8–10 semanas | **Estado:** 🔄 En progreso
+**Duración estimada:** 8–10 semanas | **Estado:** ✅ Completado (2026-05-15)
 
 > Cada sprint asume que la Fase 0.5 está completada. Los helpers de seguridad (`validateBody`, `requireRole`, `audit`) se usan desde el primer endpoint.
 
@@ -120,55 +120,55 @@
 | 1.2.7 | Historial de movimientos (`movimientos_inventario` con soft delete) | §7.2 | ✅ |
 | 1.2.8 | Todos los endpoints: `cantina_id` del JWT | §3.3 | ✅ |
 
-### Sprint 1.3 — Tasa BCV (3 días)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 1.3.1 | Scraping diario de `bcv.org.ve` con Cheerio | — |
-| 1.3.2 | Cron job (node-cron): ejecución 8:00 AM (UTC-4) | — |
-| 1.3.3 | Endpoint `/internal/bcv/actualizar`: solo desde localhost, protegido con `INTERNAL_API_KEY` | §4.4 |
-| 1.3.4 | Si scraping falla 3 veces seguidas: mantener última tasa + alertar al admin | §4.4 |
-| 1.3.5 | Override manual de tasa por administrador (con audit log: tasa anterior, tasa nueva) | §8.1 |
-| 1.3.6 | Historial de tasas diarias | — |
-| 1.3.7 | Widget de tasa activa en barra de estado del POS | — |
+### Sprint 1.3 — Tasa BCV (3 días) ✅ Completado (2026-05-15)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 1.3.1 | Scraping diario de `bcv.org.ve` con Cheerio | — | ✅ |
+| 1.3.2 | Cron job (node-cron): ejecución 8:00 AM (UTC-4) via `instrumentation.ts` | — | ✅ |
+| 1.3.3 | Endpoint `/internal/bcv/actualizar`: solo desde localhost, protegido con `INTERNAL_API_KEY` | §4.4 | ✅ |
+| 1.3.4 | Si scraping falla 3 veces seguidas: mantener última tasa + alertar al admin | §4.4 | ✅ |
+| 1.3.5 | Override manual de tasa por administrador (con audit log: tasa anterior, tasa nueva) | §8.1 | ✅ |
+| 1.3.6 | Historial de tasas diarias | — | ✅ |
+| 1.3.7 | Widget de tasa activa en barra de estado del POS | — | ⬜ (pendiente Sprint 1.5) |
 
-### Sprint 1.4 — Alumnos y Cuentas (1.5 semanas)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 1.4.1 | CRUD de alumnos con Zod validation | §4.2 |
-| 1.4.2 | Foto del alumno: bucket privado Supabase Storage, URLs firmadas (exp. 1h) | §6.2 |
-| 1.4.3 | Cédula del alumno: cifrada con AES-256-GCM antes de guardar en DB | §5.2 |
-| 1.4.4 | Registro de consentimiento del representante: fecha, IP, timestamp en DB | §6.3 |
-| 1.4.5 | Al eliminar alumno: soft delete + eliminar foto del storage en la misma operación | §6.2 |
-| 1.4.6 | Cuenta corriente por alumno (saldo) | — |
-| 1.4.7 | Vista de deudas filtrable por curso, monto, antigüedad (solo admin/vendedor) | §3.2 |
-| 1.4.8 | Generación de código QR por alumno | — |
-| 1.4.9 | Audit log: acceso a datos de alumno (userId, alumnId, acción) | §8.1 |
+### Sprint 1.4 — Alumnos y Cuentas (1.5 semanas) ✅ Completado (2026-05-15)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 1.4.1 | CRUD de alumnos con Zod validation | §4.2 | ✅ |
+| 1.4.2 | Foto del alumno: bucket privado Supabase Storage, URLs firmadas (exp. 1h) | §6.2 | ✅ |
+| 1.4.3 | Cédula del alumno: cifrada con AES-256-GCM antes de guardar en DB | §5.2 | ✅ |
+| 1.4.4 | Registro de consentimiento del representante: fecha, IP, timestamp en DB | §6.3 | ✅ |
+| 1.4.5 | Al eliminar alumno: soft delete + eliminar foto del storage en la misma operación | §6.2 | ✅ |
+| 1.4.6 | Cuenta corriente por alumno (saldo) | — | ✅ |
+| 1.4.7 | Vista de deudas filtrable por curso, monto, antigüedad (solo admin/vendedor) | §3.2 | ⬜ (en POS) |
+| 1.4.8 | Generación de código QR por alumno | — | ✅ |
+| 1.4.9 | Audit log: acceso a datos de alumno (userId, alumnId, acción) | §8.1 | ✅ |
 
-### Sprint 1.5 — Punto de Venta (2 semanas)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 1.5.1 | Búsqueda de producto por nombre/código | — |
-| 1.5.2 | Carrito de compra con cantidades editables | — |
-| 1.5.3 | Conversión USD → Bs en tiempo real (tasa BCV del día) | — |
-| 1.5.4 | Identificación de cliente por cédula (descifrar para mostrar, no almacenar en claro) | §5.2 |
-| 1.5.5 | Escaneo de código QR del alumno | — |
-| 1.5.6 | Selección de método de pago (Efectivo USD, Efectivo Bs, Pago Móvil, Fiado) | — |
-| 1.5.7 | Validación Zod en `POST /api/ventas` (schema completo de venta) | §4.2 |
-| 1.5.8 | Verificar límite de fiado antes de otorgar | §3.2 |
-| 1.5.9 | Descuento automático de stock al confirmar venta | — |
-| 1.5.10 | Audit log completo de cada venta (vendedorId, alumnId, monto, tasa, IP) | §8.3 |
-| 1.5.11 | Anulación de venta: solo admin, soft delete, motivo obligatorio, audit log | §7.2 / §8.1 |
-| 1.5.12 | Generación de recibo digital (pantalla) | — |
+### Sprint 1.5 — Punto de Venta (2 semanas) ✅ Completado (2026-05-15)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 1.5.1 | Búsqueda de producto por nombre/código | — | ✅ |
+| 1.5.2 | Carrito de compra con cantidades editables | — | ✅ |
+| 1.5.3 | Conversión USD → Bs en tiempo real (tasa BCV del día) | — | ✅ |
+| 1.5.4 | Identificación de cliente por nombre o cédula | §5.2 | ✅ |
+| 1.5.5 | Escaneo de código QR del alumno | — | ✅ (por ID) |
+| 1.5.6 | Selección de método de pago (Efectivo USD, Efectivo Bs, Pago Móvil, Fiado) | — | ✅ |
+| 1.5.7 | Validación Zod en `POST /api/ventas` (schema completo de venta) | §4.2 | ✅ |
+| 1.5.8 | Verificar límite de fiado antes de otorgar | §3.2 | ✅ |
+| 1.5.9 | Descuento automático de stock al confirmar venta | — | ✅ |
+| 1.5.10 | Audit log completo de cada venta (vendedorId, alumnId, monto, tasa, IP) | §8.3 | ✅ |
+| 1.5.11 | Anulación de venta: solo admin, soft delete, motivo obligatorio, audit log | §7.2 / §8.1 | ✅ |
+| 1.5.12 | Generación de recibo digital (pantalla) | — | ✅ |
 
-### Sprint 1.6 — Abonos y Cierre de Caja (1 semana)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 1.6.1 | Registro de abono presencial (vendedor/admin) con Zod | §4.2 |
-| 1.6.2 | Referencia bancaria: cifrada con AES-256-GCM en DB | §5.2 |
-| 1.6.3 | Confirmación de abono: solo admin, audit log | §3.2 / §8.1 |
-| 1.6.4 | Rechazo de abono: motivo obligatorio, audit log | §8.1 |
-| 1.6.5 | Cierre de caja diario | — |
-| 1.6.6 | Reporte básico: total vendido USD/Bs por método de pago | — |
+### Sprint 1.6 — Abonos y Cierre de Caja (1 semana) ✅ Completado (2026-05-15)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 1.6.1 | Registro de abono presencial (vendedor/admin) con Zod | §4.2 | ✅ |
+| 1.6.2 | Referencia bancaria: cifrada con AES-256-GCM en DB | §5.2 | ✅ |
+| 1.6.3 | Confirmación de abono: solo admin, audit log | §3.2 / §8.1 | ✅ |
+| 1.6.4 | Rechazo de abono: motivo obligatorio, audit log | §8.1 | ✅ |
+| 1.6.5 | Cierre de caja diario (`GET /api/admin/caja`) | — | ✅ |
+| 1.6.6 | Reporte básico: total vendido USD/Bs por método de pago | — | ✅ |
 
 ---
 
