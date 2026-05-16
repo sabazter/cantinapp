@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Pencil, PackagePlus, SlidersHorizontal, History, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, PackagePlus, SlidersHorizontal, History, AlertTriangle, UtensilsCrossed } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,7 @@ interface Producto {
   nombre: string;
   categoria: "tienda" | "menu";
   precio_usd: string;
+  precio_jornada_usd: string | null;
   stock: number;
   stock_min: number;
   activo: boolean;
@@ -64,9 +65,14 @@ const ajusteSchema = z.object({
   motivo:   z.string().min(1, "El motivo es obligatorio").max(200),
 });
 
+const jornadaSchema = z.object({
+  precioJornada: z.number().positive("Debe ser mayor a 0").nullable(),
+});
+
 type ProductoForm = z.infer<typeof productoSchema>;
 type EntradaForm  = z.infer<typeof entradaSchema>;
 type AjusteForm   = z.infer<typeof ajusteSchema>;
+type JornadaForm  = z.infer<typeof jornadaSchema>;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -94,6 +100,7 @@ export function InventarioClient() {
   const [modalEntrada,    setModalEntrada]    = useState<Producto | null>(null);
   const [modalAjuste,     setModalAjuste]     = useState<Producto | null>(null);
   const [modalHistorial,  setModalHistorial]  = useState<Producto | null>(null);
+  const [modalJornada,    setModalJornada]    = useState<Producto | null>(null);
   const [movimientos,     setMovimientos]     = useState<Movimiento[]>([]);
 
   const fetchProductos = useCallback(async () => {
@@ -216,6 +223,31 @@ export function InventarioClient() {
     if (res.ok) setMovimientos(await res.json());
   };
 
+  // ── Precio jornada (menú del día) ─────────────────────────────────────────
+  const jornadaForm = useForm<JornadaForm>({ resolver: zodResolver(jornadaSchema) });
+
+  const abrirJornada = (p: Producto) => {
+    jornadaForm.reset({ precioJornada: p.precio_jornada_usd ? Number(p.precio_jornada_usd) : null });
+    setModalJornada(p);
+  };
+
+  const onJornada = async (data: JornadaForm) => {
+    if (!modalJornada) return;
+    const res = await fetch(`/api/admin/inventario/${modalJornada.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ precioJornada: data.precioJornada }),
+    });
+    if (res.ok) {
+      toast.success(data.precioJornada ? "Precio del día actualizado" : "Precio del día eliminado");
+      setModalJornada(null);
+      jornadaForm.reset();
+      fetchProductos();
+    } else {
+      toast.error("Error al actualizar precio");
+    }
+  };
+
   // ── Desactivar ─────────────────────────────────────────────────────────────
   const onDesactivar = async (p: Producto) => {
     if (!confirm(`¿Desactivar "${p.nombre}"?`)) return;
@@ -275,7 +307,8 @@ export function InventarioClient() {
               <TableRow>
                 <TableHead>Producto</TableHead>
                 <TableHead>Categoría</TableHead>
-                <TableHead className="text-right">Precio USD</TableHead>
+                <TableHead className="text-right">Precio base</TableHead>
+                <TableHead className="text-right">Precio hoy</TableHead>
                 <TableHead className="text-right">Stock</TableHead>
                 <TableHead className="text-right">Mínimo</TableHead>
                 <TableHead>Estado</TableHead>
@@ -285,7 +318,7 @@ export function InventarioClient() {
             <TableBody>
               {productosFiltrados.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                     Sin productos
                   </TableCell>
                 </TableRow>
@@ -299,6 +332,11 @@ export function InventarioClient() {
                       <Badge variant="outline">{CATEGORIA_LABEL[p.categoria]}</Badge>
                     </TableCell>
                     <TableCell className="text-right font-mono">{formatUsd(p.precio_usd)}</TableCell>
+                    <TableCell className="text-right font-mono">
+                      {p.precio_jornada_usd
+                        ? <span className="text-blue-600 font-semibold">{formatUsd(p.precio_jornada_usd)}</span>
+                        : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
                     <TableCell className="text-right">
                       <span className={stockBajo ? "text-orange-600 font-semibold" : ""}>
                         {p.stock}
@@ -327,6 +365,11 @@ export function InventarioClient() {
                           <DropdownMenuItem onClick={() => { ajusteForm.reset(); setModalAjuste(p); }}>
                             <SlidersHorizontal className="h-4 w-4 mr-2" /> Ajuste manual
                           </DropdownMenuItem>
+                          {p.categoria === "menu" && (
+                            <DropdownMenuItem onClick={() => abrirJornada(p)}>
+                              <UtensilsCrossed className="h-4 w-4 mr-2" /> Precio menú hoy
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem onClick={() => abrirHistorial(p)}>
                             <History className="h-4 w-4 mr-2" /> Historial
                           </DropdownMenuItem>
@@ -463,6 +506,46 @@ export function InventarioClient() {
               <Button type="button" variant="outline" onClick={() => setModalAjuste(null)}>Cancelar</Button>
               <Button type="submit" disabled={ajusteForm.formState.isSubmitting}>
                 {ajusteForm.formState.isSubmitting ? "Guardando..." : "Aplicar ajuste"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Precio menú por jornada */}
+      <Dialog open={!!modalJornada} onOpenChange={(o) => !o && setModalJornada(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Precio menú hoy — {modalJornada?.nombre}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Precio base: <strong>{modalJornada ? formatUsd(modalJornada.precio_usd) : ""}</strong>.
+            Establece un precio especial para el menú de hoy. Déjalo vacío para usar el precio base.
+          </p>
+          <form onSubmit={jornadaForm.handleSubmit(onJornada)} className="space-y-4">
+            <Field label="Precio del día USD" error={jornadaForm.formState.errors.precioJornada?.message}>
+              <Input
+                {...jornadaForm.register("precioJornada", { valueAsNumber: true, setValueAs: v => v === "" ? null : Number(v) })}
+                type="number" step="0.01" placeholder="Dejar vacío para usar precio base"
+              />
+            </Field>
+            <DialogFooter className="gap-2">
+              {modalJornada?.precio_jornada_usd && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-destructive"
+                  onClick={async () => {
+                    jornadaForm.setValue("precioJornada", null);
+                    await jornadaForm.handleSubmit(onJornada)();
+                  }}
+                >
+                  Eliminar precio
+                </Button>
+              )}
+              <Button type="button" variant="outline" onClick={() => setModalJornada(null)}>Cancelar</Button>
+              <Button type="submit" disabled={jornadaForm.formState.isSubmitting}>
+                {jornadaForm.formState.isSubmitting ? "Guardando..." : "Guardar"}
               </Button>
             </DialogFooter>
           </form>

@@ -39,7 +39,7 @@ export const POST = withAuth(async (req: NextRequest, session) => {
   const productoIds = body.items.map(i => i.productoId);
   const { data: productos, error: prodErr } = await supabase
     .from("productos")
-    .select("id, nombre, precio_usd, stock, activo, cantina_id")
+    .select("id, nombre, precio_usd, precio_jornada_usd, stock, activo, cantina_id")
     .in("id", productoIds);
 
   if (prodErr || !productos) throw prodErr ?? new Error("Error cargando productos");
@@ -56,9 +56,12 @@ export const POST = withAuth(async (req: NextRequest, session) => {
   }
 
   // Calcular totales
+  const precioEfectivo = (prod: { precio_usd: string; precio_jornada_usd?: string | null }) =>
+    prod.precio_jornada_usd ? Number(prod.precio_jornada_usd) : Number(prod.precio_usd);
+
   const totalUsd = body.items.reduce((sum, item) => {
     const prod = productos.find(p => p.id === item.productoId)!;
-    return sum + Number(prod.precio_usd) * item.cantidad;
+    return sum + precioEfectivo(prod) * item.cantidad;
   }, 0);
   const totalBs = totalUsd * tasaBcv;
 
@@ -120,7 +123,7 @@ export const POST = withAuth(async (req: NextRequest, session) => {
       venta_id:             venta.id,
       producto_id:          item.productoId,
       cantidad:             item.cantidad,
-      precio_usd_unitario:  Number(prod.precio_usd),
+      precio_usd_unitario:  precioEfectivo(prod),
     };
   });
 

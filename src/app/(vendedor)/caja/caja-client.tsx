@@ -15,7 +15,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Minus, Plus, Trash2, Search, ShoppingCart, User, Loader2, CheckCircle2,
+  Minus, Plus, Trash2, Search, ShoppingCart, User, Loader2, CheckCircle2, Download,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -25,6 +25,7 @@ interface Producto {
   nombre: string;
   categoria: "tienda" | "menu";
   precio_usd: string;
+  precio_jornada_usd: string | null;
   stock: number;
   activo: boolean;
 }
@@ -84,7 +85,13 @@ export function CajaClient() {
   const [processing, setProcessing] = useState(false);
   const [error, setError]           = useState<string | null>(null);
   const [successModal, setSuccessModal] = useState(false);
-  const [lastRecibo, setLastRecibo]     = useState<{ id: string; totalUsd: number; totalBs: number; tasa: number } | null>(null);
+  const [lastRecibo, setLastRecibo]     = useState<{
+    id: string; totalUsd: number; totalBs: number; tasa: number;
+    items: { nombre: string; cantidad: number; precioUsd: number }[];
+    alumnoNombre: string | null;
+    metodoPago: string;
+    fecha: string;
+  } | null>(null);
 
   // Load productos & BCV rate
   useEffect(() => {
@@ -149,7 +156,10 @@ export function CajaClient() {
     setCarrito(prev => prev.filter(i => i.id !== id));
   }, []);
 
-  const totalUsd  = carrito.reduce((s, i) => s + Number(i.precio_usd) * i.cantidad, 0);
+  const precioEfectivo = (prod: Producto) =>
+    prod.precio_jornada_usd ? Number(prod.precio_jornada_usd) : Number(prod.precio_usd);
+
+  const totalUsd  = carrito.reduce((s, i) => s + precioEfectivo(i) * i.cantidad, 0);
   const totalBs   = tasa ? totalUsd * tasa.tasa : null;
 
   const prodsFiltrados = productos.filter(p => {
@@ -186,7 +196,16 @@ export function CajaClient() {
         throw new Error(data.error ?? "Error al procesar la venta");
       }
 
-      setLastRecibo({ id: data.id, totalUsd: data.totalUsd, totalBs: data.totalBs, tasa: data.tasaBcv });
+      setLastRecibo({
+        id:          data.id,
+        totalUsd:    data.totalUsd,
+        totalBs:     data.totalBs,
+        tasa:        data.tasaBcv,
+        items:       carrito.map(i => ({ nombre: i.nombre, cantidad: i.cantidad, precioUsd: precioEfectivo(i) })),
+        alumnoNombre: selectedAlumno?.nombre ?? null,
+        metodoPago,
+        fecha:       new Date().toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }),
+      });
       setCarrito([]);
       setSelectedAlumno(null);
       setAlumnoSearch("");
@@ -207,6 +226,67 @@ export function CajaClient() {
   const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
   const fmtBs  = (n: number) =>
     new Intl.NumberFormat("es-VE", { minimumFractionDigits: 2 }).format(n) + " Bs";
+
+  const descargarPDF = async () => {
+    if (!lastRecibo) return;
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ unit: "mm", format: [80, 160], orientation: "portrait" });
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("CantinApp", 40, 12, { align: "center" });
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(`Fecha: ${lastRecibo.fecha}`, 6, 20);
+    doc.text(`Ref: ${lastRecibo.id.slice(-8).toUpperCase()}`, 6, 25);
+    doc.text(`Pago: ${lastRecibo.metodoPago.replace(/_/g, " ")}`, 6, 30);
+    if (lastRecibo.alumnoNombre) {
+      doc.text(`Alumno: ${lastRecibo.alumnoNombre}`, 6, 35);
+    }
+
+    doc.setDrawColor(180);
+    doc.line(6, 38, 74, 38);
+
+    let y = 44;
+    doc.setFont("helvetica", "bold");
+    doc.text("Producto", 6, y);
+    doc.text("Cant", 46, y, { align: "right" });
+    doc.text("USD", 74, y, { align: "right" });
+    y += 4;
+    doc.setFont("helvetica", "normal");
+    doc.line(6, y, 74, y);
+    y += 4;
+
+    for (const item of lastRecibo.items) {
+      const nombre = item.nombre.length > 22 ? item.nombre.slice(0, 21) + "…" : item.nombre;
+      doc.text(nombre, 6, y);
+      doc.text(String(item.cantidad), 46, y, { align: "right" });
+      doc.text(fmtUsd(item.precioUsd * item.cantidad), 74, y, { align: "right" });
+      y += 5;
+    }
+
+    doc.setDrawColor(180);
+    doc.line(6, y, 74, y);
+    y += 5;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Total USD:", 6, y);
+    doc.text(fmtUsd(lastRecibo.totalUsd), 74, y, { align: "right" });
+    y += 5;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(`Total Bs (${lastRecibo.tasa.toFixed(2)}):`, 6, y);
+    doc.text(fmtBs(lastRecibo.totalBs), 74, y, { align: "right" });
+    y += 8;
+
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(7);
+    doc.text("Gracias por su compra", 40, y, { align: "center" });
+
+    doc.save(`recibo-${lastRecibo.id.slice(-8).toUpperCase()}.pdf`);
+  };
 
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
@@ -283,10 +363,12 @@ export function CajaClient() {
                   >
                     <p className="text-sm font-medium leading-tight line-clamp-2">{prod.nombre}</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {fmtUsd(Number(prod.precio_usd))}
+                      {prod.precio_jornada_usd ? (
+                        <span className="text-blue-600 font-semibold">{fmtUsd(Number(prod.precio_jornada_usd))}</span>
+                      ) : fmtUsd(Number(prod.precio_usd))}
                       {tasa && (
                         <span className="ml-1 text-[10px]">
-                          · {fmtBs(Number(prod.precio_usd) * tasa.tasa)}
+                          · {fmtBs(precioEfectivo(prod) * tasa.tasa)}
                         </span>
                       )}
                     </p>
@@ -368,7 +450,7 @@ export function CajaClient() {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium truncate">{item.nombre}</p>
                   <p className="text-[10px] text-muted-foreground">
-                    {fmtUsd(Number(item.precio_usd))} c/u
+                    {fmtUsd(precioEfectivo(item))} c/u
                   </p>
                 </div>
                 <div className="flex items-center gap-1">
@@ -387,7 +469,7 @@ export function CajaClient() {
                   </button>
                 </div>
                 <p className="text-xs font-medium w-14 text-right tabular-nums">
-                  {fmtUsd(Number(item.precio_usd) * item.cantidad)}
+                  {fmtUsd(precioEfectivo(item) * item.cantidad)}
                 </p>
                 <button onClick={() => removeFromCart(item.id)} className="text-muted-foreground hover:text-destructive">
                   <Trash2 className="h-3 w-3" />
@@ -497,7 +579,10 @@ export function CajaClient() {
               </div>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="flex-col gap-2">
+            <Button variant="outline" className="w-full gap-2" onClick={descargarPDF}>
+              <Download className="h-4 w-4" /> Descargar PDF
+            </Button>
             <Button className="w-full" onClick={() => setSuccessModal(false)}>
               Nueva venta
             </Button>
