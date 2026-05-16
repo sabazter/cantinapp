@@ -10,9 +10,10 @@
 
 ## Estado Actual
 
-> **Fase:** Fase 0.5 completada (2026-05-15). Listo para Sprint 1.1.  
-> **Nota Supabase:** tablas creadas vía MCP (no `prisma migrate dev`); baseline registrada en `_prisma_migrations`. Acceso a DB vía Supabase REST API (`@supabase/supabase-js`). Conexión directa PostgreSQL/Prisma bloqueada por Supavisor en este entorno — no afecta la app, que usa la REST API.  
-> **Deploy:** Docker en servidor privado. Imagen multi-stage con `output: standalone`. Build: `docker build --build-arg NEXT_PUBLIC_SUPABASE_URL=... -t cantinapp .` — el resto de vars se inyectan en runtime.
+> **Fase:** Sprints 2.1–2.3 completados (2026-05-15). Listo para Sprint 2.4.  
+> **Nota Supabase:** tablas creadas vía MCP (no `prisma migrate dev`); baseline registrada en `_prisma_migrations`. Acceso a DB vía Supabase REST API (`@supabase/supabase-js`). Conexión directa PostgreSQL/Prisma bloqueada por Supavisor en este entorno — no afecta la app, que usa la REST API. RLS habilitado en todas las tablas (PP.20 ✅).  
+> **Deploy:** Docker en servidor privado. Imagen multi-stage con `output: standalone`. Build: `docker build --build-arg NEXT_PUBLIC_SUPABASE_URL=... -t cantinapp .` — el resto de vars se inyectan en runtime.  
+> **Next.js:** actualizado a 16.2.6 para eliminar CVEs de producción (PP.23 ✅).
 
 ---
 
@@ -173,7 +174,7 @@
 ---
 
 ## Fase Pre-Producción — Checklist de Seguridad
-**Duración estimada:** 1 semana | **Estado:** ⬜ Pendiente  
+**Duración estimada:** 1 semana | **Estado:** 🔄 En progreso (PP.20 y PP.23 completados)  
 **Referencia:** Sección 12 de `CantinApp_Seguridad_y_CRM.md`
 
 > 🔴 **Bloqueante absoluto.** Ningún usuario real accede al sistema sin completar esta fase.
@@ -199,10 +200,10 @@
 | PP.17 | Soft delete en tablas financieras (no `.delete()` en ventas/abonos) | §7.2 |
 | PP.18 | Backup automático Supabase configurado y probado | §5.4 |
 | PP.19 | HTTPS forzado, HTTP redirige 301 | §5.1 |
-| PP.20 | RLS habilitado en Supabase para todas las tablas | §7.1 |
+| PP.20 | RLS habilitado en Supabase para todas las tablas | §7.1 | ✅ |
 | PP.21 | Rol de DB con permisos mínimos (no usar rol público) | §7.1 |
 | PP.22 | Entornos dev/staging/production separados, sin datos reales en dev | §7.3 |
-| PP.23 | `npm audit` sin vulnerabilidades críticas | §7.4 |
+| PP.23 | `npm audit` sin vulnerabilidades críticas (Next.js actualizado a 16.2.6) | §7.4 | ✅ |
 | PP.24 | Tabla de auditoría funcionando (eventos financieros y de acceso) | §8.1 |
 | PP.25 | Logs sin datos sensibles, servicio externo conectado (Logtail/Axiom) | §8.2 |
 | PP.26 | Política de privacidad redactada y visible en la app | §6.5 |
@@ -214,40 +215,40 @@
 ---
 
 ## Fase 2 — Portal Representantes y Notificaciones
-**Duración estimada:** 4–5 semanas | **Estado:** ⬜ Pendiente
+**Duración estimada:** 4–5 semanas | **Estado:** 🔄 En progreso (Sprints 2.1–2.3 completados)
 
-### Sprint 2.1 — Portal del Representante (1.5 semanas)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 2.1.1 | Vista de saldo y deuda del alumno (solo sus propios hijos) | §3.4 |
-| 2.1.2 | Historial de compras: sin exponer datos de otros alumnos | §3.4 |
-| 2.1.3 | Formulario de reporte de abono (Zod, tamaño máx. comprobante: 5 MB, solo jpg/png/webp) | §4.2 |
-| 2.1.4 | Verificación de email del representante al registrarse (código de confirmación) | §9.2 |
-| 2.1.5 | Soporte para representante con múltiples hijos | — |
-| 2.1.6 | Opt-out de notificaciones desde el portal | §9.1 |
-| 2.1.7 | Mecanismo de solicitud de eliminación de datos desde el portal | §6.3 |
+### Sprint 2.1 — Portal del Representante (1.5 semanas) ✅ Completado (2026-05-15)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 2.1.1 | Vista de saldo y deuda del alumno (solo sus propios hijos) | §3.4 | ✅ |
+| 2.1.2 | Historial de compras: sin exponer datos de otros alumnos | §3.4 | ✅ |
+| 2.1.3 | Formulario de reporte de abono (Zod, tamaño máx. comprobante: 5 MB, solo jpg/png/webp) | §4.2 | ✅ |
+| 2.1.4 | Verificación de email del representante al registrarse (código de confirmación) | §9.2 | ⬜ |
+| 2.1.5 | Soporte para representante con múltiples hijos | — | ✅ |
+| 2.1.6 | Opt-out de notificaciones desde el portal | §9.1 | ⬜ |
+| 2.1.7 | Mecanismo de solicitud de eliminación de datos desde el portal | §6.3 | ⬜ |
 
-### Sprint 2.2 — Notificaciones Email (1 semana)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 2.2.1 | Integración Resend API | — |
-| 2.2.2 | Configurar SPF, DKIM y DMARC en el dominio | §9.2 |
-| 2.2.3 | Email al registrar fiado (sin datos financieros en cuerpo — redirigir al portal) | §9.2 |
-| 2.2.4 | Email al confirmar abono | — |
-| 2.2.5 | Email de stock bajo al admin | — |
-| 2.2.6 | Resumen diario de ventas al admin | — |
-| 2.2.7 | Links de reset de contraseña: token uso-único, exp. 15 min, invalidar tras usar | §9.2 |
+### Sprint 2.2 — Notificaciones Email (1 semana) ✅ Completado (2026-05-15)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 2.2.1 | Integración Resend API | — | ✅ |
+| 2.2.2 | Configurar SPF, DKIM y DMARC en el dominio | §9.2 | ⬜ (config DNS externa) |
+| 2.2.3 | Email al registrar fiado (sin datos financieros en cuerpo — redirigir al portal) | §9.2 | ✅ |
+| 2.2.4 | Email al confirmar abono | — | ✅ |
+| 2.2.5 | Email de stock bajo al admin | — | ✅ |
+| 2.2.6 | Resumen diario de ventas al admin | — | ✅ |
+| 2.2.7 | Links de reset de contraseña: token uso-único, exp. 15 min, invalidar tras usar | §9.2 | ✅ |
 
-### Sprint 2.3 — Notificaciones WhatsApp (1 semana)
-| # | Tarea | Seg. |
-|---|-------|------|
-| 2.3.1 | Integración Twilio WhatsApp API (número verificado ante Meta) | §9.1 |
-| 2.3.2 | Mensaje al registrar fiado (sin saldo exacto en el mensaje) | §9.1 |
-| 2.3.3 | Mensaje al confirmar abono | — |
-| 2.3.4 | Alerta de deuda alta al representante | — |
-| 2.3.5 | Rate limit de notificaciones: máx. 10 mensajes/día por representante, cooldown 1h por tipo | §9.3 |
-| 2.3.6 | Si rebota 3 veces: marcar como inválido y alertar al admin | §9.3 |
-| 2.3.7 | Audit log de cada mensaje enviado (destinatario, tipo, timestamp — sin contenido) | §9.1 |
+### Sprint 2.3 — Notificaciones WhatsApp (1 semana) ✅ Completado (2026-05-15)
+| # | Tarea | Seg. | Estado |
+|---|-------|------|--------|
+| 2.3.1 | Integración Twilio WhatsApp API (número verificado ante Meta) | §9.1 | ✅ |
+| 2.3.2 | Mensaje al registrar fiado (sin saldo exacto en el mensaje) | §9.1 | ✅ |
+| 2.3.3 | Mensaje al confirmar abono | — | ✅ |
+| 2.3.4 | Alerta de deuda alta al representante | — | ✅ |
+| 2.3.5 | Rate limit de notificaciones: máx. 10 mensajes/día por representante, cooldown 1h por tipo | §9.3 | ✅ |
+| 2.3.6 | Si rebota 3 veces: marcar como inválido y alertar al admin | §9.3 | ✅ |
+| 2.3.7 | Audit log de cada mensaje enviado (destinatario, tipo, timestamp — sin contenido) | §9.1 | ✅ |
 
 ### Sprint 2.4 — Mejoras POS (1 semana)
 | # | Tarea | Ref. |
@@ -366,9 +367,9 @@ Antes de finalizar Fase 1, definir:
 | Fase | Descripción | Duración | Estado |
 |------|-------------|----------|--------|
 | 0 | Setup del entorno | 2–3 días | ✅ |
-| 0.5 | Seguridad fundacional | 3–4 días | ⬜ |
-| 1 | MVP Core (POS, inventario, fiado, BCV) | 8–10 sem | ⬜ |
-| PP | Checklist pre-producción (30 ítems) | 1 sem | ⬜ |
-| 2 | Portal representantes + notificaciones | 4–5 sem | ⬜ |
+| 0.5 | Seguridad fundacional | 3–4 días | ✅ |
+| 1 | MVP Core (POS, inventario, fiado, BCV) | 8–10 sem | ✅ |
+| PP | Checklist pre-producción (30 ítems) | 1 sem | 🔄 (PP.20, PP.23 ✅) |
+| 2 | Portal representantes + notificaciones | 4–5 sem | 🔄 (Sprints 2.1–2.3 ✅) |
 | 3 | Reportes avanzados + multi-sede + PWA offline | 4–5 sem | ⬜ |
 | 4 | CRM completo | 5–6 sem | ⬜ |

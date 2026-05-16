@@ -4,6 +4,7 @@ import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { audit, AuditEvent } from "@/lib/audit";
+import { notificarAbonoConfirmado, notificarAbonoRechazado } from "@/lib/notifications";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -75,6 +76,13 @@ export const POST = withAuth(async (req: NextRequest, session, { params }: Ctx) 
       entidadId: id,
       datos:     { montoUsd: Number(abono.monto_usd), alumnoId: cuentaData?.alumno_id ?? null },
     });
+
+    // Notificar al representante (fire-and-forget, no bloquear la respuesta)
+    if (cuentaData?.alumno_id) {
+      const { data: alumno } = await supabase
+        .from("alumnos").select("nombre").eq("id", cuentaData.alumno_id).single();
+      if (alumno) notificarAbonoConfirmado(cuentaData.alumno_id, alumno.nombre).catch(() => {});
+    }
   } else {
     await supabase.from("abonos").update({
       estado:         "rechazado",
@@ -91,6 +99,13 @@ export const POST = withAuth(async (req: NextRequest, session, { params }: Ctx) 
       entidadId: id,
       datos:     { motivo: body.motivo },
     });
+
+    // Notificar rechazo al representante (fire-and-forget)
+    if (cuentaData?.alumno_id) {
+      const { data: alumno } = await supabase
+        .from("alumnos").select("nombre").eq("id", cuentaData.alumno_id).single();
+      if (alumno) notificarAbonoRechazado(cuentaData.alumno_id, alumno.nombre, body.motivo).catch(() => {});
+    }
   }
 
   return NextResponse.json({ ok: true });

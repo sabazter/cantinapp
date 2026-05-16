@@ -5,6 +5,7 @@ import { validateBody } from "@/lib/validate";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { audit, AuditEvent } from "@/lib/audit";
 import { tasaActivaBcv } from "@/lib/bcv";
+import { notificarFiadoRegistrado } from "@/lib/notifications";
 
 const itemSchema = z.object({
   productoId: z.string().min(1),
@@ -167,6 +168,12 @@ export const POST = withAuth(async (req: NextRequest, session) => {
       items:      body.items.length,
     },
   });
+
+  // Notificar fiado al representante (fire-and-forget)
+  if (body.metodoPago === "fiado" && body.alumnoId) {
+    const { data: al } = await supabase.from("alumnos").select("nombre").eq("id", body.alumnoId).single();
+    if (al) notificarFiadoRegistrado(body.alumnoId, al.nombre).catch(() => {});
+  }
 
   return NextResponse.json({ id: venta.id, totalUsd, totalBs, tasaBcv }, { status: 201 });
 });

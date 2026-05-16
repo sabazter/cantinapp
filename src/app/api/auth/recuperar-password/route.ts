@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import { z } from "zod";
 import { validateBody } from "@/lib/validate";
 import { createServerSupabase } from "@/lib/supabase-server";
+import { sendEmail } from "@/lib/email/resend";
+import { emailResetPassword } from "@/lib/email/templates";
 
 const schema = z.object({ email: z.email() });
 
@@ -42,31 +44,11 @@ export async function POST(req: NextRequest) {
       expires_at: expiresAt,
     });
 
-    // Enviar email si Resend está configurado
-    if (process.env.RESEND_API_KEY) {
-      const resetUrl = `${process.env.NEXTAUTH_URL}/recuperar-password/nueva?token=${token}`;
-      await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from:    process.env.RESEND_FROM ?? "noreply@cantinapp.com",
-          to:      email,
-          subject: "Restablecer contraseña — CantinApp",
-          html: `
-            <p>Hola ${usuario.nombre},</p>
-            <p>Recibiste este email porque solicitaste restablecer tu contraseña.</p>
-            <p><a href="${resetUrl}">Haz clic aquí para continuar</a></p>
-            <p>Este enlace expira en ${TTL_MINUTOS} minutos y solo puede usarse una vez.</p>
-            <p>Si no solicitaste este cambio, ignora este email.</p>
-          `,
-        }),
-      }).catch((e) => console.error("[reset-pwd] email error:", e));
-    } else {
-      // En desarrollo, loguear el token para pruebas
-      console.info(`[reset-pwd] TOKEN (dev): ${token}`);
+    // Enviar email con plantilla centralizada
+    const tmpl = emailResetPassword(token);
+    const sent = await sendEmail({ to: email, ...tmpl });
+    if (!sent) {
+      console.info(`[reset-pwd] TOKEN (fallback dev): ${token}`);
     }
 
     return NextResponse.json({ ok: true });

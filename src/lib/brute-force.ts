@@ -1,4 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase-server";
+import { notificarCuentaBloqueada } from "@/lib/notifications";
 
 const INTENTOS_BLOQUEO_TEMPORAL = 5;
 const INTENTOS_BLOQUEO_PERMANENTE = 20;
@@ -34,6 +35,17 @@ export async function verificarBloqueo(email: string): Promise<EstadoBloqueo> {
 
   if (total >= INTENTOS_BLOQUEO_PERMANENTE) {
     return { bloqueado: true, permanente: true, intentosRestantes: 0 };
+  }
+
+  // Notificar al admin cuando se alcanza el bloqueo temporal (primer disparo)
+  if (recientes === INTENTOS_BLOQUEO_TEMPORAL) {
+    const supabase2 = createServerSupabase();
+    const { data: usuario } = await supabase2
+      .from("usuarios")
+      .select("cantina_id")
+      .eq("email", email)
+      .single();
+    notificarCuentaBloqueada(usuario?.cantina_id ?? null, email).catch(() => {});
   }
 
   if (recientes >= INTENTOS_BLOQUEO_TEMPORAL) {

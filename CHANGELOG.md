@@ -178,6 +178,66 @@ Setup completo de la Fase 0. El proyecto compila sin errores TypeScript. La base
 
 ---
 
+### [2026-05-15] Sprint 2.3 — Notificaciones WhatsApp con Twilio
+**Tipo:** feat  
+**Módulo:** Notificaciones / WhatsApp  
+**Archivos creados/modificados:**
+- `src/lib/whatsapp.ts` — cliente Twilio + rate limiting (máx. 10/día, cooldown 1h/tipo), registra en tabla `notificaciones`, alerta al admin tras 3+ fallos
+- `src/lib/notifications.ts` — actualizado: `notificarFiadoRegistrado` y `notificarAbonoConfirmado` ahora envían WhatsApp cuando `notif_whatsapp=true` y el representante tiene teléfono registrado
+
+**Nuevas dependencias:** `twilio`
+
+**Descripción:**  
+Integración completa de Twilio WhatsApp API. Cada función de notificación respeta preferencias del representante (`notif_email`, `notif_whatsapp`). Sin datos financieros en el cuerpo del mensaje, solo enlace al portal (§9.1). Rate limiting en capa de aplicación: máx. 10 mensajes/día por `usuario_id`, cooldown 1h por tipo de notificación. Los mensajes se registran en la tabla `notificaciones` (estados: pendiente → enviado | error). Si acumula 3+ errores para el mismo usuario, se registra en logs para revisión del admin (§9.3). Funciona en modo simulado si `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` no están configurados.
+
+---
+
+### [2026-05-15] Sprint 2.2 — Notificaciones Email con Resend
+**Tipo:** feat  
+**Módulo:** Notificaciones / Email  
+**Archivos creados/modificados:**
+- `src/lib/email/resend.ts` — wrapper `sendEmail()` con Resend SDK; modo simulado si `RESEND_API_KEY` no está configurado
+- `src/lib/email/templates.ts` — 7 plantillas HTML: fiado registrado, abono confirmado, abono rechazado, stock bajo, resumen diario, cuenta bloqueada, reset de contraseña. Sin montos en el cuerpo — solo enlaces al portal (§9.2)
+- `src/lib/notifications.ts` — servicio centralizado de notificaciones con `getRepresentante()` para leer preferencias de canal
+- `src/app/api/admin/abonos/[id]/route.ts` — notificaciones fire-and-forget al confirmar/rechazar abono
+- `src/app/api/ventas/route.ts` — notificación fire-and-forget al registrar fiado
+- `src/lib/brute-force.ts` — notificación al admin cuando cuenta queda bloqueada
+- `src/app/api/auth/recuperar-password/route.ts` — reemplazado fetch directo a Resend por plantilla centralizada
+
+**Nuevas dependencias:** `resend`
+
+**Descripción:**  
+Sistema de email transaccional completo. Las plantillas no incluyen importes ni saldos, solo redirigen al portal para prevenir exposición de datos financieros por email (§9.2). Las notificaciones se disparan en fire-and-forget (`.catch(() => {})`) para no bloquear las respuestas de la API. La función `getRepresentante()` centraliza la consulta de preferencias del canal del representante y determina si enviar email, WhatsApp, ambos o ninguno.
+
+---
+
+### [2026-05-15] Sprint 2.1 — Portal del Representante
+**Tipo:** feat  
+**Módulo:** Portal Representante  
+**Archivos creados/modificados:**
+- `src/app/api/representante/alumnos/route.ts` — GET: lista hijos del representante (filtra por `representante_id === session.user.id`)
+- `src/app/api/representante/alumnos/[id]/route.ts` — GET: detalle del alumno + ventas paginadas; verifica propiedad antes de retornar datos
+- `src/app/api/representante/abonos/route.ts` — POST: reportar abono (con comprobante opcional al bucket `comprobantes-abonos`, máx. 5 MB, jpg/png/webp); GET: historial de abonos del hijo
+- `src/app/(representante)/portal/page.tsx` — wrapper server component
+- `src/app/(representante)/portal/portal-client.tsx` — UI completa: card de saldo, botón "Reportar abono", tabs compras/abonos, modal con upload de comprobante
+
+**Descripción:**  
+Portal funcional para representantes. Soporte para múltiples hijos (selector de alumno). El aislamiento de datos es estricto: cada query verifica `representante_id` contra el ID de la sesión — nunca se exponen datos de alumnos de otros representantes (§3.4). El comprobante de abono se almacena en bucket privado de Supabase Storage. Los abonos quedan en estado `pendiente` hasta que el admin los confirme o rechace.
+
+---
+
+### [2026-05-15] Pre-Producción: RLS + Next.js upgrade
+**Tipo:** chore  
+**Módulo:** Seguridad / Infraestructura  
+**Cambios:**
+- RLS habilitado en las 15 tablas de Supabase via MCP migration `enable_rls_all_tables` (PP.20 ✅)
+- Next.js actualizado de 14.2.35 a 16.2.6 para eliminar 4 CVEs de producción: DoS, HTTP smuggling, cache poisoning, XSS (PP.23 ✅)
+
+**Descripción:**  
+Row Level Security habilitado en todas las tablas. El service role (usado por la app via Supabase SDK) bypasea RLS sin cambios en el código. La clave anon queda con acceso cero por defecto. Upgrade de Next.js necesario para eliminar vulnerabilidades críticas de producción; la app no requirió cambios tras el upgrade.
+
+---
+
 *(Los cambios futuros se registran aquí en orden cronológico descendente)*
 
 ---
