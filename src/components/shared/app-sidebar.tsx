@@ -18,6 +18,7 @@ import {
   Wallet,
   Building2,
   Shield,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -43,8 +44,10 @@ const NAV_ITEMS: Record<string, NavItem[]> = {
     { label: "Config.",    href: "/admin/configuracion", icon: Settings },
   ],
   superadmin: [
-    { label: "Panel global",  href: "/superadmin/dashboard", icon: Shield },
-    { label: "Cantinas",      href: "/superadmin/cantinas",  icon: Building2 },
+    { label: "Panel global",  href: "/superadmin/dashboard",          icon: Shield        },
+    { label: "Cantinas",      href: "/superadmin/cantinas",           icon: Building2     },
+    { label: "Usuarios",      href: "/superadmin/usuarios-globales",  icon: Users         },
+    { label: "Auditoría",     href: "/superadmin/audit-log",          icon: ClipboardList },
   ],
   vendedor: [
     { label: "Caja",   href: "/caja",   icon: ShoppingCart },

@@ -151,9 +151,9 @@ export function SuperadminDashboardClient() {
       {/* Acceso rápido a gestión */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {[
-          { href: "/superadmin/cantinas",        label: "Gestionar cantinas"   },
-          { href: "/superadmin/usuarios-globales", label: "Usuarios globales"  },
-          { href: "/superadmin/audit-log",         label: "Registro de auditoría" },
+          { href: "/superadmin/cantinas",          label: "Gestionar cantinas"      },
+          { href: "/superadmin/usuarios-globales", label: "Usuarios globales"       },
+          { href: "/superadmin/audit-log",         label: "Registro de auditoría"   },
         ].map(link => (
           <a
             key={link.href}
@@ -164,6 +164,7 @@ export function SuperadminDashboardClient() {
           </a>
         ))}
       </div>
+
     </div>
   );
 }
