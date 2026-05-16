@@ -7,13 +7,14 @@ import { audit, AuditEvent } from "@/lib/audit";
 import { decrypt, encrypt } from "@/lib/crypto";
 
 const editSchema = z.object({
-  nombre:          z.string().min(1).max(100).optional(),
-  cedula:          z.string().min(1).max(20).optional(),
-  curso:           z.string().min(1).max(20).optional(),
-  seccion:         z.string().max(10).optional(),
-  limiteFiadoUsd:  z.number().min(0).optional(),
-  representanteId: z.string().optional(),
-  activo:          z.boolean().optional(),
+  nombre:           z.string().min(1).max(100).optional(),
+  cedula:           z.string().min(1).max(20).optional(),
+  curso:            z.string().min(1).max(20).optional(),
+  seccion:          z.string().max(10).optional(),
+  fiadoHabilitado:  z.boolean().optional(),
+  limiteFiadoUsd:   z.number().min(0).optional(),
+  representanteId:  z.string().optional(),
+  activo:           z.boolean().optional(),
 });
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -44,7 +45,7 @@ export const GET = withAuth(async (_req: NextRequest, session, { params }: Ctx) 
     .from("alumnos")
     .select(`
       id, nombre, cedula_encriptada, curso, seccion,
-      foto_url, qr_code, limite_fiado_usd, activo,
+      foto_url, qr_code, fiado_habilitado, limite_fiado_usd, activo,
       consentimiento_ip, consentimiento_at, created_at,
       cuentas_alumnos ( saldo )
     `)
@@ -78,13 +79,14 @@ export const PUT = withAuth(async (req: NextRequest, session, { params }: Ctx) =
   const body = await validateBody(req, editSchema);
 
   const updates: Record<string, unknown> = {};
-  if (body.nombre    !== undefined) updates.nombre           = body.nombre;
-  if (body.cedula    !== undefined) updates.cedula_encriptada = encrypt(body.cedula);
-  if (body.curso     !== undefined) updates.curso             = body.curso;
-  if (body.seccion   !== undefined) updates.seccion           = body.seccion;
-  if (body.limiteFiadoUsd !== undefined) updates.limite_fiado_usd = body.limiteFiadoUsd;
-  if (body.representanteId !== undefined) updates.representante_id = body.representanteId;
-  if (body.activo    !== undefined) updates.activo            = body.activo;
+  if (body.nombre           !== undefined) updates.nombre            = body.nombre;
+  if (body.cedula           !== undefined) updates.cedula_encriptada = encrypt(body.cedula);
+  if (body.curso            !== undefined) updates.curso             = body.curso;
+  if (body.seccion          !== undefined) updates.seccion           = body.seccion;
+  if (body.fiadoHabilitado  !== undefined) updates.fiado_habilitado  = body.fiadoHabilitado;
+  if (body.limiteFiadoUsd   !== undefined) updates.limite_fiado_usd  = body.limiteFiadoUsd;
+  if (body.representanteId  !== undefined) updates.representante_id  = body.representanteId;
+  if (body.activo           !== undefined) updates.activo            = body.activo;
 
   const supabase = createServerSupabase();
   const { error } = await supabase.from("alumnos").update(updates).eq("id", id);

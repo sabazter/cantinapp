@@ -40,6 +40,7 @@ interface Alumno {
   nombre: string;
   curso: string;
   seccion: string | null;
+  fiado_habilitado: boolean;
   limite_fiado_usd: string | null;
   cuentas_alumnos: { saldo: string } | null;
 }
@@ -450,7 +451,15 @@ export function CajaClient() {
                     <button
                       key={a.id}
                       className="w-full text-left px-3 py-2 text-xs hover:bg-accent"
-                      onClick={() => { setSelectedAlumno(a); setAlumnoSearch(""); setAlumnoResults([]); }}
+                      onClick={() => {
+                        setSelectedAlumno(a);
+                        setAlumnoSearch("");
+                        setAlumnoResults([]);
+                        // Si el alumno no tiene fiado, quitar fiado del método de pago
+                        if (!a.fiado_habilitado && metodoPago === "fiado") {
+                          setMetodoPago("efectivo_usd");
+                        }
+                      }}
                     >
                       <p className="font-medium">{a.nombre}</p>
                       <p className="text-muted-foreground">{a.curso}{a.seccion ? ` ${a.seccion}` : ""}</p>
@@ -520,16 +529,48 @@ export function CajaClient() {
 
           <div className="space-y-1.5">
             <label className="text-xs font-medium">Método de pago</label>
-            <Select value={metodoPago} onValueChange={(v) => setMetodoPago((v ?? "efectivo_usd") as MetodoPago)}>
+            <Select
+              value={metodoPago}
+              onValueChange={(v) => {
+                const val = (v ?? "efectivo_usd") as MetodoPago;
+                if (val === "fiado" && selectedAlumno && !selectedAlumno.fiado_habilitado) return;
+                setMetodoPago(val);
+              }}
+            >
               <SelectTrigger className="h-8 text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {METODOS.map(m => (
-                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                ))}
+                {METODOS.map(m => {
+                  const fiadoBloqueado = m.value === "fiado" && selectedAlumno && !selectedAlumno.fiado_habilitado;
+                  return (
+                    <SelectItem
+                      key={m.value}
+                      value={m.value}
+                      disabled={!!fiadoBloqueado}
+                      className={fiadoBloqueado ? "opacity-40 cursor-not-allowed" : ""}
+                    >
+                      {m.label}
+                      {fiadoBloqueado ? " (no habilitado)" : ""}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
+            {/* Aviso si fiado no está habilitado para el alumno seleccionado */}
+            {selectedAlumno && !selectedAlumno.fiado_habilitado && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                Este alumno no tiene fiado habilitado. Contacte al administrador.
+              </p>
+            )}
+            {selectedAlumno?.fiado_habilitado && selectedAlumno.limite_fiado_usd && (
+              <p className="text-[11px] text-muted-foreground">
+                Límite fiado: ${Number(selectedAlumno.limite_fiado_usd).toFixed(2)} ·
+                Saldo: {Number(selectedAlumno.cuentas_alumnos?.saldo ?? 0) < 0
+                  ? `-$${Math.abs(Number(selectedAlumno.cuentas_alumnos?.saldo ?? 0)).toFixed(2)}`
+                  : `$${Number(selectedAlumno.cuentas_alumnos?.saldo ?? 0).toFixed(2)}`}
+              </p>
+            )}
           </div>
 
           {(metodoPago === "pago_movil" || metodoPago === "transferencia" as MetodoPago) && (

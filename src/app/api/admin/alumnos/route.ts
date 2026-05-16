@@ -34,7 +34,7 @@ export const GET = withAuth(async (req: NextRequest, session) => {
     .from("alumnos")
     .select(`
       id, nombre, cedula_encriptada, curso, seccion,
-      foto_url, qr_code, limite_fiado_usd, activo,
+      foto_url, qr_code, fiado_habilitado, limite_fiado_usd, activo,
       created_at,
       cuentas_alumnos ( saldo )
     `)

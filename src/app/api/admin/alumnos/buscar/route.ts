@@ -19,7 +19,7 @@ export const GET = withAuth(async (req: NextRequest, session) => {
   if (id) {
     const { data } = await supabase
       .from("alumnos")
-      .select("id, nombre, curso, seccion, limite_fiado_usd, cuentas_alumnos(saldo)")
+      .select("id, nombre, curso, seccion, fiado_habilitado, limite_fiado_usd, cuentas_alumnos(saldo)")
       .eq("id", id)
       .eq("cantina_id", cantinaId)
       .eq("activo", true)
@@ -52,7 +52,7 @@ export const GET = withAuth(async (req: NextRequest, session) => {
     // Cargar todos y comparar descifrado (costoso pero alumnos son pocos)
     const { data: todos } = await supabase
       .from("alumnos")
-      .select("id, nombre, curso, seccion, limite_fiado_usd, cedula_encriptada, cuentas_alumnos(saldo)")
+      .select("id, nombre, curso, seccion, fiado_habilitado, limite_fiado_usd, cedula_encriptada, cuentas_alumnos(saldo)")
       .eq("cantina_id", cantinaId)
       .eq("activo", true)
       .is("deleted_at", null);

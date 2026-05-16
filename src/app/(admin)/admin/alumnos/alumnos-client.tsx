@@ -20,7 +20,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { MoreHorizontal, Plus, Search, UserX, Pencil, Eye, QrCode } from "lucide-react";
+import { MoreHorizontal, Plus, Search, UserX, Pencil, Eye, QrCode, CreditCard, CreditCardIcon } from "lucide-react";
 import Image from "next/image";
 
 interface Alumno {
@@ -30,6 +30,7 @@ interface Alumno {
   seccion: string | null;
   foto_url: string | null;
   qr_code: string | null;
+  fiado_habilitado: boolean;
   limite_fiado_usd: string | null;
   activo: boolean;
   created_at: string;
@@ -52,10 +53,11 @@ const crearSchema = z.object({
 });
 
 const editarSchema = z.object({
-  nombre:         z.string().min(1, "Requerido").max(100),
-  curso:          z.string().min(1, "Requerido").max(20),
-  seccion:        z.string().max(10).optional(),
-  limiteFiadoUsd: z.number().min(0).optional(),
+  nombre:          z.string().min(1, "Requerido").max(100),
+  curso:           z.string().min(1, "Requerido").max(20),
+  seccion:         z.string().max(10).optional(),
+  fiadoHabilitado: z.boolean(),
+  limiteFiadoUsd:  z.number().min(0).optional(),
 });
 
 type CrearForm  = z.infer<typeof crearSchema>;
@@ -178,13 +180,31 @@ export function AlumnosClient() {
   function abrirEditar(alumno: Alumno) {
     setSelected(alumno);
     editarForm.reset({
-      nombre:  alumno.nombre,
-      curso:   alumno.curso,
-      seccion: alumno.seccion ?? "",
-      limiteFiadoUsd: alumno.limite_fiado_usd ? Number(alumno.limite_fiado_usd) : undefined,
+      nombre:          alumno.nombre,
+      curso:           alumno.curso,
+      seccion:         alumno.seccion ?? "",
+      fiadoHabilitado: alumno.fiado_habilitado,
+      limiteFiadoUsd:  alumno.limite_fiado_usd ? Number(alumno.limite_fiado_usd) : undefined,
     });
     setModalEditar(true);
     setActionErr(null);
+  }
+
+  async function toggleFiado(alumno: Alumno) {
+    const habilitar = !alumno.fiado_habilitado;
+    const accion    = habilitar ? "habilitar" : "deshabilitar";
+    if (!confirm(`¿${accion.charAt(0).toUpperCase() + accion.slice(1)} el fiado para ${alumno.nombre}?`)) return;
+    try {
+      const res = await fetch(`/api/admin/alumnos/${alumno.id}`, {
+        method:  "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ fiadoHabilitado: habilitar }),
+      });
+      if (!res.ok) throw new Error();
+      await fetchAlumnos();
+    } catch {
+      setError(`Error al ${accion} el fiado`);
+    }
   }
 
   const formatSaldo = (saldo: string | undefined) => {
@@ -251,7 +271,7 @@ export function AlumnosClient() {
               <TableHead>Nombre</TableHead>
               <TableHead>Curso</TableHead>
               <TableHead className="text-right">Saldo</TableHead>
-              <TableHead>Límite fiado</TableHead>
+              <TableHead>Fiado</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead className="w-10" />
             </TableRow>
@@ -281,8 +301,18 @@ export function AlumnosClient() {
                   <TableCell className={`text-right tabular-nums ${saldoColor(alumno.cuentas_alumnos?.saldo)}`}>
                     {formatSaldo(alumno.cuentas_alumnos?.saldo)}
                   </TableCell>
-                  <TableCell className="tabular-nums">
-                    {alumno.limite_fiado_usd ? `$${Number(alumno.limite_fiado_usd).toFixed(2)}` : "—"}
+                  <TableCell>
+                    {alumno.fiado_habilitado ? (
+                      <Badge variant="default" className="text-[10px] gap-1">
+                        <CreditCard className="h-3 w-3" />
+                        Habilitado
+                        {alumno.limite_fiado_usd && ` · $${Number(alumno.limite_fiado_usd).toFixed(0)}`}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        No habilitado
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant={alumno.activo ? "default" : "secondary"}>
@@ -302,6 +332,10 @@ export function AlumnosClient() {
                         <DropdownMenuItem onClick={() => abrirEditar(alumno)}>
                           <Pencil className="mr-2 h-3.5 w-3.5" />
                           Editar
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => toggleFiado(alumno)}>
+                          <CreditCardIcon className="mr-2 h-3.5 w-3.5" />
+                          {alumno.fiado_habilitado ? "Deshabilitar fiado" : "Habilitar fiado"}
                         </DropdownMenuItem>
                         {alumno.qr_code && (
                           <DropdownMenuItem onClick={() => { setSelected(alumno); setModalQr(true); }}>
@@ -430,13 +464,40 @@ export function AlumnosClient() {
                 <Label>Sección</Label>
                 <Input {...editarForm.register("seccion")} />
               </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label>Límite de fiado USD</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  {...editarForm.register("limiteFiadoUsd", { valueAsNumber: true })}
-                />
+              <div className="col-span-2">
+                <div className="rounded-md border p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Fiado habilitado</p>
+                      <p className="text-xs text-muted-foreground">
+                        El representante solicitó habilitar el crédito en cantina
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="sr-only peer"
+                        {...editarForm.register("fiadoHabilitado")}
+                      />
+                      <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:bg-primary transition-colors
+                        after:content-[''] after:absolute after:top-0.5 after:left-0.5
+                        after:bg-white after:rounded-full after:h-4 after:w-4
+                        after:transition-all peer-checked:after:translate-x-4" />
+                    </label>
+                  </div>
+                  {editarForm.watch("fiadoHabilitado") && (
+                    <div className="space-y-1.5 pt-1">
+                      <Label className="text-xs">Límite de fiado USD (vacío = sin límite)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="Sin límite"
+                        className="h-8 text-sm"
+                        {...editarForm.register("limiteFiadoUsd", { valueAsNumber: true })}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             {actionErr && <p className="text-xs text-destructive">{actionErr}</p>}
@@ -479,8 +540,17 @@ export function AlumnosClient() {
                     </p>
                   </div>
                   <div>
-                    <p className="text-muted-foreground text-xs">Límite fiado</p>
-                    <p>{detalle.limite_fiado_usd ? `$${Number(detalle.limite_fiado_usd).toFixed(2)}` : "Sin límite"}</p>
+                    <p className="text-muted-foreground text-xs">Fiado</p>
+                    {detalle.fiado_habilitado ? (
+                      <p className="font-medium text-green-700">
+                        Habilitado
+                        {detalle.limite_fiado_usd
+                          ? ` · límite $${Number(detalle.limite_fiado_usd).toFixed(2)}`
+                          : " · sin límite"}
+                      </p>
+                    ) : (
+                      <p className="text-muted-foreground">No habilitado</p>
+                    )}
                   </div>
                   <div className="col-span-2">
                     <p className="text-muted-foreground text-xs">Consentimiento registrado</p>

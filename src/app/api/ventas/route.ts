@@ -72,7 +72,7 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     }
     const { data: alumno } = await supabase
       .from("alumnos")
-      .select("limite_fiado_usd, cuentas_alumnos(saldo)")
+      .select("fiado_habilitado, limite_fiado_usd, cuentas_alumnos(saldo)")
       .eq("id", body.alumnoId)
       .eq("cantina_id", cantinaId)
       .is("deleted_at", null)
@@ -80,6 +80,10 @@ export const POST = withAuth(async (req: NextRequest, session) => {
 
     if (!alumno) {
       return NextResponse.json({ error: "Alumno no encontrado" }, { status: 400 });
+    }
+
+    if (!alumno.fiado_habilitado) {
+      return NextResponse.json({ error: "Este alumno no tiene el fiado habilitado" }, { status: 403 });
     }
 
     const cuenta = Array.isArray(alumno.cuentas_alumnos)

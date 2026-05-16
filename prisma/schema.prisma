@@ -142,6 +142,7 @@ model Alumno {
   seccion             String?
   fotoUrl             String?   @map("foto_url")
   qrCode              String?   @map("qr_code")
+  fiadoHabilitado     Boolean   @default(false) @map("fiado_habilitado")
   limiteFiadoUsd      Decimal?  @map("limite_fiado_usd") @db.Decimal(10, 2)
   consentimientoIp    String?   @map("consentimiento_ip")
   consentimientoAt    DateTime? @map("consentimiento_at")
