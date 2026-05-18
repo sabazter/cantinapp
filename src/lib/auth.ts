@@ -39,14 +39,23 @@ declare module "next-auth/jwt" {
 
 // ── RS256 helpers ─────────────────────────────────────────────────────────────
 
+let _privateKey: Awaited<ReturnType<typeof importPKCS8>> | null = null;
+let _publicKey:  Awaited<ReturnType<typeof importSPKI>>  | null = null;
+
 async function getPrivateKey() {
-  const pem = process.env.NEXTAUTH_PRIVATE_KEY!.replace(/\\n/g, "\n");
-  return importPKCS8(pem, "RS256");
+  if (!_privateKey) {
+    const pem = process.env.NEXTAUTH_PRIVATE_KEY!.replace(/\\n/g, "\n");
+    _privateKey = await importPKCS8(pem, "RS256");
+  }
+  return _privateKey;
 }
 
 async function getPublicKey() {
-  const pem = process.env.NEXTAUTH_PUBLIC_KEY!.replace(/\\n/g, "\n");
-  return importSPKI(pem, "RS256");
+  if (!_publicKey) {
+    const pem = process.env.NEXTAUTH_PUBLIC_KEY!.replace(/\\n/g, "\n");
+    _publicKey = await importSPKI(pem, "RS256");
+  }
+  return _publicKey;
 }
 
 const ACCESS_TOKEN_TTL = 15 * 60; // 15 minutos
