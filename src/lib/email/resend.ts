@@ -1,9 +1,13 @@
 import { Resend } from "resend";
 
-// Instancia única de Resend
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 export const FROM = process.env.RESEND_FROM ?? "CantinApp <noreply@cantinapp.com>";
+
+// Inicialización lazy — no rompe el módulo si falta la API key en dev
+let _resend: Resend | null = null;
+function getResend() {
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY ?? "re_placeholder");
+  return _resend;
+}
 
 interface SendOptions {
   to:      string | string[];
@@ -23,7 +27,7 @@ export async function sendEmail(opts: SendOptions): Promise<boolean> {
   }
 
   try {
-    const { error } = await resend.emails.send({
+    const { error } = await getResend().emails.send({
       from:    FROM,
       to:      Array.isArray(opts.to) ? opts.to : [opts.to],
       subject: opts.subject,

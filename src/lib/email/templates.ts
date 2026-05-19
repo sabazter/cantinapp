@@ -129,6 +129,36 @@ export const emailVerificacion = (token: string) => ({
   text: `Verifica tu correo visitando: ${BASE_URL}/verificar-email?token=${token}`,
 });
 
+export const emailBienvenidaRepresentante = (nombre: string, verToken: string) => ({
+  subject: "Bienvenido a CantinApp — Verifica tu correo",
+  html: base(`
+    <p>Hola <strong>${nombre}</strong>,</p>
+    <p>Tu cuenta de representante ha sido creada exitosamente. Ya puedes acceder al portal
+    para consultar el saldo y el historial de compras de tus hijos.</p>
+    <p>Por favor verifica tu dirección de correo haciendo clic en el botón:</p>
+    <a href="${BASE_URL}/verificar-email?token=${verToken}" class="btn">Verificar mi correo</a>
+    <p style="margin-top:16px; font-size:13px; color:#6b7280;">
+      Este enlace es válido por 24 horas.
+    </p>
+  `),
+  text: `Hola ${nombre}, verifica tu correo: ${BASE_URL}/verificar-email?token=${verToken}`,
+});
+
+export const emailNuevoRegistroAdmin = (repNombre: string, repEmail: string, alumnoNombre: string, cantinaId: string) => ({
+  subject: "Nuevo representante registrado — CantinApp",
+  html: base(`
+    <p>Se ha registrado un nuevo representante en la cantina:</p>
+    <ul style="color:#374151; font-size:14px; line-height:2;">
+      <li><strong>Nombre:</strong> ${repNombre}</li>
+      <li><strong>Email:</strong> ${repEmail}</li>
+      <li><strong>Alumno:</strong> ${alumnoNombre}</li>
+    </ul>
+    <p>Recuerda habilitar el fiado para el alumno si corresponde desde el panel.</p>
+    <a href="${BASE_URL}/admin/alumnos" class="btn">Ver alumnos</a>
+  `),
+  text: `Nuevo representante: ${repNombre} (${repEmail}) — Alumno: ${alumnoNombre}`,
+});
+
 export const emailSolicitudEliminacion = (nombre: string, email: string) => ({
   subject: "Solicitud de eliminación de datos — CantinApp",
   html: base(`

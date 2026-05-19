@@ -194,6 +194,12 @@ export function LoginForm() {
               ¿Olvidaste tu contraseña?
             </Link>
           </p>
+          <p className="text-center text-sm text-muted-foreground">
+            ¿No tienes cuenta?{" "}
+            <Link href="/registro" className="text-primary underline hover:no-underline">
+              Regístrate
+            </Link>
+          </p>
           <p className="text-center text-xs text-muted-foreground">
             <Link href="/privacidad" className="hover:underline">
               Política de privacidad
