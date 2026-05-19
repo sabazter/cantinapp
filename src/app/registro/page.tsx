@@ -12,7 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, ChevronRight, ChevronLeft, UserPlus, GraduationCap } from "lucide-react";
+import { CheckCircle2, ChevronRight, ChevronLeft, UserPlus, User, Users } from "lucide-react";
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -39,13 +39,14 @@ type AlumnoForm = z.infer<typeof alumnoSchema>;
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-const STEPS = ["Tu cuenta", "Tu hijo/a", "Listo"];
+const STEPS = ["Tu cuenta", "Titular", "Listo"];
 
 export default function RegistroPage() {
   const router = useRouter();
-  const [step,    setStep]    = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState<string | null>(null);
+  const [step,        setStep]        = useState(0);
+  const [loading,     setLoading]     = useState(false);
+  const [error,       setError]       = useState<string | null>(null);
+  const [paraMiMismo, setParaMiMismo] = useState(false);
 
   const repForm = useForm<RepForm>({
     resolver: zodResolver(repSchema),
@@ -59,6 +60,9 @@ export default function RegistroPage() {
 
   async function onStep0(values: RepForm) {
     setError(null);
+    if (paraMiMismo) {
+      alumnoForm.setValue("nombre", values.nombre);
+    }
     setStep(1);
   }
 
@@ -210,6 +214,39 @@ export default function RegistroPage() {
                   )}
                 </div>
 
+                {/* ¿Para quién es la cuenta? */}
+                <div className="rounded-lg border p-3 space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    ¿Para quién es la cuenta en la cantina?
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setParaMiMismo(false)}
+                      className={`flex flex-col items-center gap-1 rounded-md border-2 px-3 py-2 text-sm transition-colors ${
+                        !paraMiMismo
+                          ? "border-primary bg-primary/5 text-primary"
+                          : "border-muted text-muted-foreground hover:border-primary/40"
+                      }`}
+                    >
+                      <Users className="h-4 w-4" />
+                      Para mi hijo/a
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setParaMiMismo(true)}
+                      className={`flex flex-col items-center gap-1 rounded-md border-2 px-3 py-2 text-sm transition-colors ${
+                        paraMiMismo
+                          ? "border-primary bg-primary/5 text-primary"
+                          : "border-muted text-muted-foreground hover:border-primary/40"
+                      }`}
+                    >
+                      <User className="h-4 w-4" />
+                      Para mí mismo
+                    </button>
+                  </div>
+                </div>
+
                 <Button type="submit" className="w-full gap-2">
                   Siguiente
                   <ChevronRight className="h-4 w-4" />
@@ -226,23 +263,29 @@ export default function RegistroPage() {
           </Card>
         )}
 
-        {/* Step 1 — Datos del alumno */}
+        {/* Step 1 — Titular de la cuenta */}
         {step === 1 && (
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
-                <GraduationCap className="h-5 w-5 text-primary" />
-                <CardTitle className="text-xl">Datos de tu hijo/a</CardTitle>
+                {paraMiMismo
+                  ? <User className="h-5 w-5 text-primary" />
+                  : <Users className="h-5 w-5 text-primary" />}
+                <CardTitle className="text-xl">Titular de la cuenta</CardTitle>
               </div>
               <CardDescription>
-                Se creará su cuenta en la cantina. El fiado queda desactivado
-                hasta que el administrador lo habilite.
+                {paraMiMismo
+                  ? "Tu propia cuenta de consumidor en la cantina."
+                  : "Cuenta del consumidor en la cantina (puede ser tu hijo/a u otro familiar)."}
+                {" "}El crédito queda desactivado hasta que el administrador lo habilite.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={alumnoForm.handleSubmit(onStep1)} className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="alumno-nombre">Nombre completo del alumno</Label>
+                  <Label htmlFor="alumno-nombre">
+                    {paraMiMismo ? "Tu nombre completo" : "Nombre completo del titular"}
+                  </Label>
                   <Input
                     id="alumno-nombre"
                     placeholder="Juan García"
@@ -276,7 +319,7 @@ export default function RegistroPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label htmlFor="cedula">Cédula del alumno (opcional)</Label>
+                  <Label htmlFor="cedula">Cédula (opcional)</Label>
                   <Input
                     id="cedula"
                     placeholder="V-12.345.678"
@@ -337,7 +380,7 @@ export default function RegistroPage() {
                   Ir al inicio de sesión
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  El fiado está desactivado por defecto. El administrador lo
+                  El crédito está desactivado por defecto. El administrador lo
                   habilitará una vez verifique los datos.
                 </p>
               </div>
