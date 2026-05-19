@@ -343,8 +343,11 @@ function TabVendedores() {
 // ── Pestaña Deudas ─────────────────────────────────────────────────────────────
 
 function TabDeudas() {
-  const [data,    setData]    = useState<DeudasData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data,        setData]        = useState<DeudasData | null>(null);
+  const [loading,     setLoading]     = useState(true);
+  const [filtroCurso, setFiltroCurso] = useState("todos");
+  const [filtroRango, setFiltroRango] = useState("todos");
+  const [busqueda,    setBusqueda]    = useState("");
 
   useEffect(() => {
     fetch("/api/admin/reportes/deudas")
@@ -362,14 +365,26 @@ function TabDeudas() {
     "+90 días":   "#7f1d1d",
   };
 
+  const rangoLabel = (dias: number) =>
+    dias <= 7 ? "0–7 días" : dias <= 30 ? "8–30 días" : dias <= 90 ? "31–90 días" : "+90 días";
+
+  const cursos = Array.from(new Set(data.deudores.map(d => d.curso))).sort();
+
+  const deudoresFiltrados = data.deudores.filter(d => {
+    if (filtroCurso !== "todos" && d.curso !== filtroCurso) return false;
+    if (filtroRango !== "todos" && rangoLabel(d.diasDeuda) !== filtroRango) return false;
+    if (busqueda && !d.nombre.toLowerCase().includes(busqueda.toLowerCase())) return false;
+    return true;
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-base font-semibold">Deudas por antigüedad</h2>
         <ExportButtons
-          disabled={data.deudores.length === 0}
-          onPdf={() => exportDeudasPdf(data.deudores)}
-          onExcel={() => exportDeudasExcel(data.deudores)}
+          disabled={deudoresFiltrados.length === 0}
+          onPdf={() => exportDeudasPdf(deudoresFiltrados)}
+          onExcel={() => exportDeudasExcel(deudoresFiltrados)}
         />
       </div>
 
@@ -380,10 +395,14 @@ function TabDeudas() {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Resumen por rango */}
+          {/* Resumen por rango (siempre del total, no filtrado) */}
           <div className="space-y-3">
             {data.porRango.filter(r => r.count > 0).map(r => (
-              <Card key={r.rango}>
+              <Card
+                key={r.rango}
+                className={`cursor-pointer transition-all ${filtroRango === r.rango ? "ring-2 ring-primary" : ""}`}
+                onClick={() => setFiltroRango(filtroRango === r.rango ? "todos" : r.rango)}
+              >
                 <CardContent className="p-4 flex items-center justify-between">
                   <div>
                     <p className="text-xs text-muted-foreground">{r.rango}</p>
@@ -398,17 +417,54 @@ function TabDeudas() {
                 </CardContent>
               </Card>
             ))}
-            {data.porRango.every(r => r.count === 0) && (
-              <p className="text-sm text-muted-foreground">Sin deudas clasificadas</p>
-            )}
           </div>
 
-          {/* Lista de deudores */}
+          {/* Lista de deudores con filtros */}
           <Card className="lg:col-span-2">
-            <CardHeader>
+            <CardHeader className="pb-3">
               <CardTitle className="text-sm">
-                Deudores ({data.deudores.length}) — Total: {fmtUsd(data.deudores.reduce((s, d) => s + Math.abs(d.saldo), 0))}
+                Deudores ({deudoresFiltrados.length}{deudoresFiltrados.length !== data.deudores.length ? ` de ${data.deudores.length}` : ""})
+                {" — "}Total: {fmtUsd(deudoresFiltrados.reduce((s, d) => s + Math.abs(d.saldo), 0))}
               </CardTitle>
+              {/* Filtros */}
+              <div className="flex flex-wrap gap-2 pt-2">
+                <input
+                  type="text"
+                  placeholder="Buscar alumno..."
+                  value={busqueda}
+                  onChange={e => setBusqueda(e.target.value)}
+                  className="h-8 rounded-md border border-input bg-background px-3 text-xs flex-1 min-w-[140px] outline-none focus:ring-1 focus:ring-ring"
+                />
+                <Select value={filtroCurso} onValueChange={setFiltroCurso}>
+                  <SelectTrigger className="h-8 w-[140px] text-xs">
+                    <SelectValue placeholder="Curso" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos los cursos</SelectItem>
+                    {cursos.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={filtroRango} onValueChange={setFiltroRango}>
+                  <SelectTrigger className="h-8 w-[140px] text-xs">
+                    <SelectValue placeholder="Antigüedad" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Toda antigüedad</SelectItem>
+                    <SelectItem value="0–7 días">0–7 días</SelectItem>
+                    <SelectItem value="8–30 días">8–30 días</SelectItem>
+                    <SelectItem value="31–90 días">31–90 días</SelectItem>
+                    <SelectItem value="+90 días">+90 días</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(filtroCurso !== "todos" || filtroRango !== "todos" || busqueda) && (
+                  <button
+                    onClick={() => { setFiltroCurso("todos"); setFiltroRango("todos"); setBusqueda(""); }}
+                    className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground underline"
+                  >
+                    Limpiar
+                  </button>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="max-h-[360px] overflow-y-auto">
@@ -422,30 +478,35 @@ function TabDeudas() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.deudores.map(d => {
-                      const rango = d.diasDeuda <= 7  ? "0–7 días"
-                                  : d.diasDeuda <= 30 ? "8–30 días"
-                                  : d.diasDeuda <= 90 ? "31–90 días"
-                                  : "+90 días";
-                      return (
-                        <TableRow key={d.nombre + d.curso}>
-                          <TableCell className="font-medium text-sm">{d.nombre}</TableCell>
-                          <TableCell className="text-muted-foreground text-sm">{d.curso}</TableCell>
-                          <TableCell className="text-right tabular-nums text-red-600 font-semibold">
-                            {fmtUsd(d.saldo)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Badge
-                              variant="outline"
-                              className="text-[10px]"
-                              style={{ color: RANGO_COLOR[rango], borderColor: RANGO_COLOR[rango] }}
-                            >
-                              {d.diasDeuda >= 999 ? "+90d" : `${d.diasDeuda}d`}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
+                    {deudoresFiltrados.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground py-8 text-sm">
+                          Sin resultados para los filtros aplicados
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      deudoresFiltrados.map(d => {
+                        const rango = rangoLabel(d.diasDeuda);
+                        return (
+                          <TableRow key={d.nombre + d.curso}>
+                            <TableCell className="font-medium text-sm">{d.nombre}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{d.curso}</TableCell>
+                            <TableCell className="text-right tabular-nums text-red-600 font-semibold">
+                              {fmtUsd(d.saldo)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Badge
+                                variant="outline"
+                                className="text-[10px]"
+                                style={{ color: RANGO_COLOR[rango], borderColor: RANGO_COLOR[rango] }}
+                              >
+                                {d.diasDeuda >= 999 ? "+90d" : `${d.diasDeuda}d`}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
                   </TableBody>
                 </Table>
               </div>

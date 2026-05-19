@@ -115,3 +115,28 @@ export const emailResetPassword = (token: string) => ({
   `),
   text: `Para restablecer tu contraseña visita: ${BASE_URL}/recuperar-password/nueva?token=${token}`,
 });
+
+export const emailVerificacion = (token: string) => ({
+  subject: "Verifica tu correo — CantinApp",
+  html: base(`
+    <p>Haz clic en el botón para verificar tu dirección de correo electrónico.</p>
+    <p>Este enlace es válido por <strong>24 horas</strong>.</p>
+    <a href="${BASE_URL}/verificar-email?token=${token}" class="btn">Verificar mi correo</a>
+    <p style="margin-top:16px; font-size:13px; color:#6b7280;">
+      Si no creaste una cuenta en CantinApp, puedes ignorar este mensaje.
+    </p>
+  `),
+  text: `Verifica tu correo visitando: ${BASE_URL}/verificar-email?token=${token}`,
+});
+
+export const emailSolicitudEliminacion = (nombre: string, email: string) => ({
+  subject: "Solicitud de eliminación de datos — CantinApp",
+  html: base(`
+    <p>El representante <strong>${nombre}</strong> (${email}) ha solicitado la eliminación de su cuenta y sus datos personales.</p>
+    <p>Por favor gestiona esta solicitud desde el panel de administración.</p>
+    <p style="margin-top:16px; font-size:13px; color:#6b7280;">
+      Según las políticas de privacidad, esta solicitud debe procesarse en un plazo de 30 días.
+    </p>
+  `),
+  text: `El representante ${nombre} (${email}) solicita eliminación de sus datos.`,
+});

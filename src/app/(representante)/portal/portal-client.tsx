@@ -21,6 +21,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   GraduationCap, Wallet, ShoppingBag, Plus, CheckCircle2, XCircle, Clock,
+  Settings, MailCheck, MailX, Bell, BellOff, Trash2,
 } from "lucide-react";
 
 interface Alumno {
@@ -74,6 +75,186 @@ const METODO_LABEL: Record<string, string> = {
   transferencia: "Transferencia",
   fiado:         "Fiado",
 };
+
+// ── Tab Configuración ─────────────────────────────────────────────────────────
+
+interface RepConfig {
+  emailVerificado: boolean;
+  notifEmail:      boolean;
+  notifWhatsapp:   boolean;
+}
+
+function TabConfiguracion() {
+  const [config,   setConfig]   = useState<RepConfig | null>(null);
+  const [loading,  setLoading]  = useState(true);
+  const [saving,   setSaving]   = useState(false);
+  const [sending,  setSending]  = useState(false);
+  const [elimMsg,  setElimMsg]  = useState<"idle" | "confirm" | "done">("idle");
+  const [msg,      setMsg]      = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/representante/config")
+      .then(r => r.json())
+      .then(d => { setConfig(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  async function enviarVerificacion() {
+    setSending(true);
+    setMsg(null);
+    const res = await fetch("/api/auth/verificar-email", { method: "POST" });
+    setSending(false);
+    if (res.ok) setMsg("Correo de verificación enviado. Revisa tu bandeja de entrada.");
+    else { const e = await res.json(); setMsg(e.error ?? "Error al enviar"); }
+  }
+
+  async function guardarPrefs(notifEmail: boolean, notifWhatsapp: boolean) {
+    if (!config) return;
+    setSaving(true);
+    setMsg(null);
+    const res = await fetch("/api/representante/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notifEmail, notifWhatsapp }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setConfig({ ...config, notifEmail, notifWhatsapp });
+      setMsg("Preferencias guardadas.");
+    } else {
+      setMsg("Error al guardar.");
+    }
+  }
+
+  async function solicitarEliminacion() {
+    setSaving(true);
+    const res = await fetch("/api/representante/solicitar-eliminacion", { method: "POST" });
+    setSaving(false);
+    if (res.ok) setElimMsg("done");
+    else setElimMsg("idle");
+  }
+
+  if (loading) return <div className="h-40 animate-pulse rounded-lg bg-muted" />;
+
+  return (
+    <div className="space-y-4">
+      {/* Email verification */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            {config?.emailVerificado
+              ? <MailCheck className="h-4 w-4 text-green-600" />
+              : <MailX className="h-4 w-4 text-amber-500" />}
+            <CardTitle className="text-base">Verificación de correo</CardTitle>
+          </div>
+          <CardDescription>
+            {config?.emailVerificado
+              ? "Tu correo electrónico está verificado."
+              : "Tu correo no ha sido verificado. Verifica para recibir notificaciones."}
+          </CardDescription>
+        </CardHeader>
+        {!config?.emailVerificado && (
+          <CardContent>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={enviarVerificacion}
+              disabled={sending}
+            >
+              {sending ? "Enviando…" : "Enviar correo de verificación"}
+            </Button>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Notification preferences */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Bell className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Notificaciones</CardTitle>
+          </div>
+          <CardDescription>Elige cómo quieres recibir avisos de la cantina</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {config && (
+            <>
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="text-sm">Notificaciones por email</span>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 accent-primary"
+                  checked={config.notifEmail}
+                  onChange={e => guardarPrefs(e.target.checked, config.notifWhatsapp)}
+                  disabled={saving}
+                />
+              </label>
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="text-sm">Notificaciones por WhatsApp</span>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 accent-primary"
+                  checked={config.notifWhatsapp}
+                  onChange={e => guardarPrefs(config.notifEmail, e.target.checked)}
+                  disabled={saving}
+                />
+              </label>
+            </>
+          )}
+          {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+        </CardContent>
+      </Card>
+
+      {/* Data deletion */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Trash2 className="h-4 w-4 text-destructive" />
+            <CardTitle className="text-base">Eliminación de datos</CardTitle>
+          </div>
+          <CardDescription>
+            Solicita la eliminación de tu cuenta y tus datos personales
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {elimMsg === "done" ? (
+            <div className="flex items-center gap-2 text-sm text-green-700">
+              <CheckCircle2 className="h-4 w-4" />
+              Solicitud enviada. El administrador la procesará en un plazo de 30 días.
+            </div>
+          ) : elimMsg === "confirm" ? (
+            <div className="space-y-3">
+              <p className="text-sm text-destructive">
+                ¿Confirmas que deseas solicitar la eliminación de tu cuenta y datos?
+                Esta acción no se puede deshacer.
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="destructive" onClick={solicitarEliminacion} disabled={saving}>
+                  {saving ? "Enviando…" : "Sí, solicitar eliminación"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setElimMsg("idle")}>
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive border-destructive/30 hover:bg-destructive/10"
+              onClick={() => setElimMsg("confirm")}
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-2" />
+              Solicitar eliminación de mis datos
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Portal principal ──────────────────────────────────────────────────────────
 
 export function PortalClient() {
   const [hijos, setHijos]         = useState<Alumno[]>([]);
@@ -298,6 +479,10 @@ export function PortalClient() {
                   <Wallet className="h-3.5 w-3.5 mr-1.5" />
                   Mis abonos
                 </TabsTrigger>
+                <TabsTrigger value="configuracion">
+                  <Settings className="h-3.5 w-3.5 mr-1.5" />
+                  Config.
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="compras">
@@ -393,6 +578,10 @@ export function PortalClient() {
                     </Table>
                   </CardContent>
                 </Card>
+              </TabsContent>
+
+              <TabsContent value="configuracion">
+                <TabConfiguracion />
               </TabsContent>
             </Tabs>
           )}
