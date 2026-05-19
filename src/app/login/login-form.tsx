@@ -194,6 +194,11 @@ export function LoginForm() {
               ¿Olvidaste tu contraseña?
             </Link>
           </p>
+          <p className="text-center text-xs text-muted-foreground">
+            <Link href="/privacidad" className="hover:underline">
+              Política de privacidad
+            </Link>
+          </p>
         </form>
       </CardContent>
     </Card>

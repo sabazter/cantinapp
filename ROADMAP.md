@@ -10,11 +10,13 @@
 
 ## Estado Actual
 
-> **Fase:** Fase 3 completada (2026-05-16). Iniciando Fase 4 (CRM).  
-> **Completado hoy:** fiado_habilitado (campo + migración aplicada en Supabase), Sprints 3.2 (export PDF/Excel), 3.3 (superadmin), 3.4 (PWA offline + IndexedDB + Background Sync).  
-> **Nota Supabase:** conexión PostgreSQL directa bloqueada — migrations se aplican vía Supabase dashboard SQL editor. `DATABASE_URL` = transaction pooler (6543), `DIRECT_URL` = session pooler (5432), ambos con `sslmode=require`.  
+> **Fase:** Pre-Producción — checklist en progreso (2026-05-19).  
+> **Completado (2026-05-19):** features pendientes 1.3.7, 1.4.7, 2.1.4, 2.1.6, 2.1.7 + página configuración + cache RSA keys (performance).  
+> **Nota Supabase:** conexión PostgreSQL directa bloqueada — migrations se aplican vía Supabase dashboard SQL editor.  
+> **Migración pendiente:** `ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS notif_email BOOLEAN DEFAULT true; ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS notif_whatsapp BOOLEAN DEFAULT true;`  
 > **Deploy:** Docker en servidor privado. Imagen multi-stage con `output: standalone`.  
-> **Next.js:** 16.2.6 (PP.23 ✅). RLS habilitado en todas las tablas (PP.20 ✅).
+> **Decisiones cerradas:** sin impresión térmica; representantes multi-alumno ✅.  
+> **Next.js:** 16.2.6. RLS habilitado ✅. npm audit limpio ✅.
 
 ---
 
@@ -131,7 +133,7 @@
 | 1.3.4 | Si scraping falla 3 veces seguidas: mantener última tasa + alertar al admin | §4.4 | ✅ |
 | 1.3.5 | Override manual de tasa por administrador (con audit log: tasa anterior, tasa nueva) | §8.1 | ✅ |
 | 1.3.6 | Historial de tasas diarias | — | ✅ |
-| 1.3.7 | Widget de tasa activa en barra de estado del POS | — | ⬜ (pendiente Sprint 1.5) |
+| 1.3.7 | Widget de tasa activa en barra de estado del POS | — | ✅ |
 
 ### Sprint 1.4 — Alumnos y Cuentas (1.5 semanas) ✅ Completado (2026-05-15)
 | # | Tarea | Seg. | Estado |
@@ -142,7 +144,7 @@
 | 1.4.4 | Registro de consentimiento del representante: fecha, IP, timestamp en DB | §6.3 | ✅ |
 | 1.4.5 | Al eliminar alumno: soft delete + eliminar foto del storage en la misma operación | §6.2 | ✅ |
 | 1.4.6 | Cuenta corriente por alumno (saldo) | — | ✅ |
-| 1.4.7 | Vista de deudas filtrable por curso, monto, antigüedad (solo admin/vendedor) | §3.2 | ⬜ (en POS) |
+| 1.4.7 | Vista de deudas filtrable por curso, monto, antigüedad (solo admin/vendedor) | §3.2 | ✅ |
 | 1.4.8 | Generación de código QR por alumno | — | ✅ |
 | 1.4.9 | Audit log: acceso a datos de alumno (userId, alumnId, acción) | §8.1 | ✅ |
 
@@ -175,43 +177,43 @@
 ---
 
 ## Fase Pre-Producción — Checklist de Seguridad
-**Duración estimada:** 1 semana | **Estado:** 🔄 En progreso (PP.20 y PP.23 completados)  
+**Duración estimada:** 1 semana | **Estado:** 🔄 En progreso (código ✅, pendientes config/operacional)  
 **Referencia:** Sección 12 de `CantinApp_Seguridad_y_CRM.md`
 
 > 🔴 **Bloqueante absoluto.** Ningún usuario real accede al sistema sin completar esta fase.
 
-| # | Ítem | Ref. |
-|---|------|------|
-| PP.1 | bcrypt cost ≥ 12 verificado en código | §2.1 |
-| PP.2 | JWT RS256 con access token 15 min + refresh token HttpOnly | §2.2 |
-| PP.3 | MFA TOTP funcionando para administradores | §2.4 |
-| PP.4 | Auto-logout 10 min (vendedor) y 30 min (admin) probado | §2.3 |
-| PP.5 | Bloqueo tras 5 intentos fallidos probado | §2.5 |
-| PP.6 | Rate limiting `/auth/login` activo | §4.1 |
-| PP.7 | Middleware `requireRole` en TODOS los endpoints protegidos | §3.2 |
-| PP.8 | `cantina_id` del JWT (no del request) en cada query — revisión completa | §3.3 |
-| PP.9 | Validación Zod en todos los endpoints de escritura | §4.2 |
-| PP.10 | Rate limiting global configurado | §4.1 |
-| PP.11 | Headers de seguridad HTTP verificados (CSP, HSTS, X-Frame) | §4.3 |
-| PP.12 | CORS restringido a dominios autorizados en producción | §4.3 |
-| PP.13 | Errores internos: sin stack traces al cliente | §4.5 |
-| PP.14 | Columnas sensibles cifradas (cédulas, referencias bancarias) | §5.2 |
-| PP.15 | Fotos de alumnos: bucket privado + URLs firmadas (expiración 1h) | §6.2 |
-| PP.16 | `.env` y `.env.local` fuera del repositorio verificado | §5.3 |
-| PP.17 | Soft delete en tablas financieras (no `.delete()` en ventas/abonos) | §7.2 |
-| PP.18 | Backup automático Supabase configurado y probado | §5.4 |
-| PP.19 | HTTPS forzado, HTTP redirige 301 | §5.1 |
+| # | Ítem | Ref. | Estado |
+|---|------|------|--------|
+| PP.1 | bcrypt cost ≥ 12 verificado en código | §2.1 | ✅ |
+| PP.2 | JWT RS256 con access token 15 min + refresh token HttpOnly | §2.2 | ✅ |
+| PP.3 | MFA TOTP funcionando para administradores | §2.4 | ✅ |
+| PP.4 | Auto-logout 10 min (vendedor) y 30 min (admin) | §2.3 | ✅ |
+| PP.5 | Bloqueo tras 5 intentos fallidos | §2.5 | ✅ |
+| PP.6 | Rate limiting `/auth/login` activo | §4.1 | ✅ |
+| PP.7 | Middleware `requireRole` en TODOS los endpoints protegidos | §3.2 | ✅ |
+| PP.8 | `cantina_id` del JWT (no del request) en cada query | §3.3 | ✅ |
+| PP.9 | Validación Zod en todos los endpoints de escritura | §4.2 | ✅ |
+| PP.10 | Rate limiting global configurado | §4.1 | ✅ |
+| PP.11 | Headers de seguridad HTTP verificados (CSP, HSTS, X-Frame) | §4.3 | ✅ |
+| PP.12 | CORS — sin wildcards, API same-origin únicamente | §4.3 | ✅ |
+| PP.13 | Errores internos: sin stack traces al cliente | §4.5 | ✅ |
+| PP.14 | Columnas sensibles cifradas (cédulas, referencias bancarias) | §5.2 | ✅ |
+| PP.15 | Fotos de alumnos: bucket privado + URLs firmadas (expiración 1h) | §6.2 | ✅ |
+| PP.16 | `.env` y `.env.local` fuera del repositorio | §5.3 | ✅ |
+| PP.17 | Soft delete en tablas financieras (no `.delete()` en ventas/abonos) | §7.2 | ✅ |
+| PP.18 | Backup automático Supabase configurado y probado | §5.4 | ⬜ config Supabase |
+| PP.19 | HTTPS forzado, HTTP redirige 301 | §5.1 | ✅ (next.config.mjs) |
 | PP.20 | RLS habilitado en Supabase para todas las tablas | §7.1 | ✅ |
-| PP.21 | Rol de DB con permisos mínimos (no usar rol público) | §7.1 |
-| PP.22 | Entornos dev/staging/production separados, sin datos reales en dev | §7.3 |
-| PP.23 | `npm audit` sin vulnerabilidades críticas (Next.js actualizado a 16.2.6) | §7.4 | ✅ |
-| PP.24 | Tabla de auditoría funcionando (eventos financieros y de acceso) | §8.1 |
-| PP.25 | Logs sin datos sensibles, servicio externo conectado (Logtail/Axiom) | §8.2 |
-| PP.26 | Política de privacidad redactada y visible en la app | §6.5 |
-| PP.27 | Consentimiento del representante registrado al crear alumno | §6.3 |
-| PP.28 | Prueba de penetración básica con OWASP ZAP | §12 |
-| PP.29 | Plan de respuesta a incidentes documentado y contactos definidos | §10.3 |
-| PP.30 | Revisión de código de seguridad por segundo par de ojos | §12 |
+| PP.21 | Rol de DB con permisos mínimos (no usar rol público) | §7.1 | ⬜ config Supabase |
+| PP.22 | Entornos dev/staging separados, sin datos reales en dev | §7.3 | ⬜ operacional |
+| PP.23 | `npm audit` sin vulnerabilidades críticas | §7.4 | ✅ |
+| PP.24 | Tabla de auditoría funcionando (eventos financieros y de acceso) | §8.1 | ✅ |
+| PP.25 | Logs sin datos sensibles, servicio externo conectado (Logtail/Axiom) | §8.2 | ✅ (logger.ts listo — configurar LOGTAIL_TOKEN en prod) |
+| PP.26 | Política de privacidad redactada y visible en la app | §6.5 | ✅ |
+| PP.27 | Consentimiento del representante registrado al crear alumno | §6.3 | ✅ |
+| PP.28 | Prueba de penetración básica con OWASP ZAP | §12 | ⬜ manual |
+| PP.29 | Plan de respuesta a incidentes documentado | §10.3 | ⬜ manual |
+| PP.30 | Revisión de código de seguridad por segundo par de ojos | §12 | ⬜ manual |
 
 ---
 
@@ -224,10 +226,10 @@
 | 2.1.1 | Vista de saldo y deuda del alumno (solo sus propios hijos) | §3.4 | ✅ |
 | 2.1.2 | Historial de compras: sin exponer datos de otros alumnos | §3.4 | ✅ |
 | 2.1.3 | Formulario de reporte de abono (Zod, tamaño máx. comprobante: 5 MB, solo jpg/png/webp) | §4.2 | ✅ |
-| 2.1.4 | Verificación de email del representante al registrarse (código de confirmación) | §9.2 | ⬜ |
+| 2.1.4 | Verificación de email del representante al registrarse (código de confirmación) | §9.2 | ✅ |
 | 2.1.5 | Soporte para representante con múltiples hijos | — | ✅ |
-| 2.1.6 | Opt-out de notificaciones desde el portal | §9.1 | ⬜ |
-| 2.1.7 | Mecanismo de solicitud de eliminación de datos desde el portal | §6.3 | ⬜ |
+| 2.1.6 | Opt-out de notificaciones desde el portal | §9.1 | ✅ |
+| 2.1.7 | Mecanismo de solicitud de eliminación de datos desde el portal | §6.3 | ✅ |
 
 ### Sprint 2.2 — Notificaciones Email (1 semana) ✅ Completado (2026-05-15)
 | # | Tarea | Seg. | Estado |
