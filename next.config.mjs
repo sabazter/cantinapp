@@ -1,9 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
-  experimental: {
-    instrumentationHook: true,
-  },
   headers: async () => [
     {
       // Service worker sin caché para que se actualice inmediatamente
