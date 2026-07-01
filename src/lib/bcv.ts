@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import https from "https";
 import { createServerSupabase } from "./supabase-server";
 import { AuditEvent } from "./audit";
 
@@ -10,15 +11,36 @@ export interface TasaBcv {
 
 let consecutiveFailures = 0;
 
-export async function scrapeBcv(): Promise<number> {
-  const res = await fetch("https://www.bcv.org.ve/", {
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; CantinApp/1.0)" },
-    next: { revalidate: 0 },
+function fetchBcvHtml(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const options = {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      },
+      rejectUnauthorized: false // Ignorar verificación de certificado de BCV (causa error de TLS localmente)
+    };
+
+    https.get("https://www.bcv.org.ve/", options, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`BCV HTTP ${res.statusCode}`));
+        return;
+      }
+
+      let data = "";
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+      res.on("end", () => {
+        resolve(data);
+      });
+    }).on("error", (err) => {
+      reject(err);
+    });
   });
+}
 
-  if (!res.ok) throw new Error(`BCV HTTP ${res.status}`);
-
-  const html = await res.text();
+export async function scrapeBcv(): Promise<number> {
+  const html = await fetchBcvHtml();
   const $ = cheerio.load(html);
 
   // BCV muestra el dólar en #dolar > .centrado > strong
