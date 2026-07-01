@@ -159,6 +159,33 @@ export const emailNuevoRegistroAdmin = (repNombre: string, repEmail: string, alu
   text: `Nuevo representante: ${repNombre} (${repEmail}) — Alumno: ${alumnoNombre}`,
 });
 
+export const emailBienvenidaProfesor = (nombre: string, verToken: string) => ({
+  subject: "Bienvenido a CantinApp — Verifica tu correo",
+  html: base(`
+    <p>Hola <strong>${nombre}</strong>,</p>
+    <p>Tu cuenta de profesor ha sido registrada exitosamente. Para completar tu registro, por favor verifica tu dirección de correo haciendo clic en el botón:</p>
+    <a href="${BASE_URL}/verificar-email?token=${verToken}" class="btn">Verificar mi correo</a>
+    <p style="margin-top:16px; font-size:13px; color:#6b7280;">
+      Una vez verificado, tu cuenta pasará a revisión. El administrador la activará para que puedas iniciar sesión.
+    </p>
+  `),
+  text: `Hola ${nombre}, verifica tu correo: ${BASE_URL}/verificar-email?token=${verToken}`,
+});
+
+export const emailNuevoRegistroProfesorAdmin = (profNombre: string, profEmail: string, cantinaId: string) => ({
+  subject: "Nuevo registro de profesor pendiente — CantinApp",
+  html: base(`
+    <p>Se ha registrado un nuevo profesor en la cantina y está pendiente de activación:</p>
+    <ul style="color:#374151; font-size:14px; line-height:2;">
+      <li><strong>Nombre:</strong> ${profNombre}</li>
+      <li><strong>Email:</strong> ${profEmail}</li>
+    </ul>
+    <p>Por favor, revisa y activa su cuenta desde el panel de usuarios para que pueda acceder.</p>
+    <a href="${BASE_URL}/admin/usuarios" class="btn">Ver usuarios</a>
+  `),
+  text: `Nuevo profesor registrado: ${profNombre} (${profEmail}) — Pendiente de activación`,
+});
+
 export const emailSolicitudEliminacion = (nombre: string, email: string) => ({
   subject: "Solicitud de eliminación de datos — CantinApp",
   html: base(`

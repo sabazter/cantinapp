@@ -43,10 +43,11 @@ const STEPS = ["Tu cuenta", "Titular", "Listo"];
 
 export default function RegistroPage() {
   const router = useRouter();
-  const [step,        setStep]        = useState(0);
-  const [loading,     setLoading]     = useState(false);
-  const [error,       setError]       = useState<string | null>(null);
-  const [paraMiMismo, setParaMiMismo] = useState(false);
+  const [step,         setStep]         = useState(0);
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState<string | null>(null);
+  const [paraMiMismo,  setParaMiMismo]  = useState(false);
+  const [tipoRegistro, setTipoRegistro] = useState<"representante" | "profesor">("representante");
 
   const repForm = useForm<RepForm>({
     resolver: zodResolver(repSchema),
@@ -81,6 +82,7 @@ export default function RegistroPage() {
           email:    repValues.email,
           password: repValues.password,
           telefono: repValues.telefono || undefined,
+          rol:      tipoRegistro,
           alumno: {
             nombre:  values.nombre,
             curso:   values.curso,
@@ -150,6 +152,40 @@ export default function RegistroPage() {
             </CardHeader>
             <CardContent>
               <form onSubmit={repForm.handleSubmit(onStep0)} className="space-y-4">
+                {/* Tipo de cuenta */}
+                <div className="space-y-1.5">
+                  <Label>Tipo de cuenta</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTipoRegistro("representante");
+                        setParaMiMismo(false);
+                      }}
+                      className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                        tipoRegistro === "representante"
+                          ? "border-primary bg-primary/5 text-primary font-semibold"
+                          : "border-input bg-transparent hover:bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      Representante
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTipoRegistro("profesor");
+                        setParaMiMismo(true);
+                      }}
+                      className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                        tipoRegistro === "profesor"
+                          ? "border-primary bg-primary/5 text-primary font-semibold"
+                          : "border-input bg-transparent hover:bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      Profesor / Personal
+                    </button>
+                  </div>
+                </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="nombre">Nombre completo</Label>
                   <Input
@@ -215,37 +251,39 @@ export default function RegistroPage() {
                 </div>
 
                 {/* ¿Para quién es la cuenta? */}
-                <div className="rounded-lg border p-3 space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    ¿Para quién es la cuenta en la cantina?
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setParaMiMismo(false)}
-                      className={`flex flex-col items-center gap-1 rounded-md border-2 px-3 py-2 text-sm transition-colors ${
-                        !paraMiMismo
-                          ? "border-primary bg-primary/5 text-primary"
-                          : "border-muted text-muted-foreground hover:border-primary/40"
-                      }`}
-                    >
-                      <Users className="h-4 w-4" />
-                      Para mi hijo/a
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setParaMiMismo(true)}
-                      className={`flex flex-col items-center gap-1 rounded-md border-2 px-3 py-2 text-sm transition-colors ${
-                        paraMiMismo
-                          ? "border-primary bg-primary/5 text-primary"
-                          : "border-muted text-muted-foreground hover:border-primary/40"
-                      }`}
-                    >
-                      <User className="h-4 w-4" />
-                      Para mí mismo
-                    </button>
+                {tipoRegistro === "representante" && (
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      ¿Para quién es la cuenta en la cantina?
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setParaMiMismo(false)}
+                        className={`flex flex-col items-center gap-1 rounded-md border-2 px-3 py-2 text-sm transition-colors ${
+                          !paraMiMismo
+                            ? "border-primary bg-primary/5 text-primary"
+                            : "border-muted text-muted-foreground hover:border-primary/40"
+                        }`}
+                      >
+                        <Users className="h-4 w-4" />
+                        Para mi hijo/a
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setParaMiMismo(true)}
+                        className={`flex flex-col items-center gap-1 rounded-md border-2 px-3 py-2 text-sm transition-colors ${
+                          paraMiMismo
+                            ? "border-primary bg-primary/5 text-primary"
+                            : "border-muted text-muted-foreground hover:border-primary/40"
+                        }`}
+                      >
+                        <User className="h-4 w-4" />
+                        Para mí mismo
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <Button type="submit" className="w-full gap-2">
                   Siguiente
@@ -268,16 +306,21 @@ export default function RegistroPage() {
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
-                {paraMiMismo
+                {tipoRegistro === "profesor"
                   ? <User className="h-5 w-5 text-primary" />
-                  : <Users className="h-5 w-5 text-primary" />}
-                <CardTitle className="text-xl">Titular de la cuenta</CardTitle>
+                  : paraMiMismo
+                    ? <User className="h-5 w-5 text-primary" />
+                    : <Users className="h-5 w-5 text-primary" />}
+                <CardTitle className="text-xl">
+                  {tipoRegistro === "profesor" ? "Datos del Profesor" : "Titular de la cuenta"}
+                </CardTitle>
               </div>
               <CardDescription>
-                {paraMiMismo
-                  ? "Tu propia cuenta de consumidor en la cantina."
-                  : "Cuenta del consumidor en la cantina (puede ser tu hijo/a u otro familiar)."}
-                {" "}El crédito queda desactivado hasta que el administrador lo habilite.
+                {tipoRegistro === "profesor"
+                  ? "Configura tu perfil de consumo en la cantina. Tu cuenta estará inactiva por defecto hasta que un administrador la apruebe."
+                  : paraMiMismo
+                    ? "Tu propia cuenta de consumidor en la cantina. El crédito queda desactivado hasta que el administrador lo habilite."
+                    : "Cuenta del consumidor en la cantina (puede ser tu hijo/a u otro familiar). El crédito queda desactivado hasta que el administrador lo habilite."}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -371,8 +414,10 @@ export default function RegistroPage() {
               <div>
                 <h2 className="text-xl font-bold">¡Cuenta creada!</h2>
                 <p className="text-muted-foreground text-sm mt-2 max-w-xs mx-auto">
-                  Revisa tu correo para verificar tu email. Luego podrás
-                  ingresar al portal con tus credenciales.
+                  Revisa tu correo para verificar tu email.
+                  {tipoRegistro === "profesor"
+                    ? " Una vez verificado, un administrador deberá aprobar y activar tu cuenta para que puedas iniciar sesión."
+                    : " Luego podrás ingresar al portal con tus credenciales."}
                 </p>
               </div>
               <div className="space-y-2">
@@ -380,8 +425,9 @@ export default function RegistroPage() {
                   Ir al inicio de sesión
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  El crédito está desactivado por defecto. El administrador lo
-                  habilitará una vez verifique los datos.
+                  {tipoRegistro === "profesor"
+                    ? "Tu cuenta estará inactiva hasta que el administrador valide tu registro."
+                    : "El crédito está desactivado por defecto. El administrador lo habilitará una vez verifique los datos."}
                 </p>
               </div>
             </CardContent>

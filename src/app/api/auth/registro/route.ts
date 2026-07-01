@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { encrypt } from "@/lib/crypto";
 import { sendEmail } from "@/lib/email/resend";
-import { emailBienvenidaRepresentante, emailNuevoRegistroAdmin } from "@/lib/email/templates";
+import { emailBienvenidaRepresentante, emailNuevoRegistroAdmin, emailBienvenidaProfesor, emailNuevoRegistroProfesorAdmin } from "@/lib/email/templates";
 import { audit } from "@/lib/audit";
 
 const registroSchema = z.object({
@@ -16,6 +16,7 @@ const registroSchema = z.object({
   password:  z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
   telefono:  z.string().max(20).optional(),
   cantinaId: z.string().optional(),
+  rol:       z.enum(["representante", "profesor"]).default("representante"),
 
   // Datos del alumno
   alumno: z.object({
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
   // Hash de contraseña
   const hashPwd = await bcrypt.hash(body.password, 12);
 
-  // Crear representante
+  // Crear representante/profesor
   const { data: usuario, error: userErr } = await supabase
     .from("usuarios")
     .insert({
@@ -86,9 +87,9 @@ export async function POST(req: NextRequest) {
       nombre:          body.nombre,
       email:           body.email,
       hash_pwd:        hashPwd,
-      rol:             "representante",
+      rol:             body.rol,
       telefono:        body.telefono ?? null,
-      activo:          true,
+      activo:          body.rol === "profesor" ? false : true,
       email_verificado: false,
     })
     .select("id")
@@ -118,7 +119,7 @@ export async function POST(req: NextRequest) {
       cedula_encriptada: cedulaEncriptada,
       curso:             body.alumno.curso,
       seccion:           body.alumno.seccion ?? null,
-      activo:            true,
+      activo:            body.rol === "profesor" ? false : true,
       fiado_habilitado:  false,
       consentimiento_ip: ip,
       consentimiento_at: new Date().toISOString(),
@@ -160,21 +161,27 @@ export async function POST(req: NextRequest) {
       .single(),
   ]);
 
+  const esProfesor = body.rol === "profesor";
+
   await Promise.all([
     sendEmail({
       to: body.email,
-      ...emailBienvenidaRepresentante(body.nombre, verToken),
+      ...(esProfesor
+        ? emailBienvenidaProfesor(body.nombre, verToken)
+        : emailBienvenidaRepresentante(body.nombre, verToken)),
     }),
     adminData.data?.email
       ? sendEmail({
           to: adminData.data.email as string,
-          ...emailNuevoRegistroAdmin(body.nombre, body.email, body.alumno.nombre, cantinaId),
+          ...(esProfesor
+            ? emailNuevoRegistroProfesorAdmin(body.nombre, body.email, cantinaId)
+            : emailNuevoRegistroAdmin(body.nombre, body.email, body.alumno.nombre, cantinaId)),
         })
       : Promise.resolve(),
     audit({
       usuarioId: usuario.id,
       cantinaId,
-      evento: "registro_representante",
+      evento: esProfesor ? "registro_profesor" : "registro_representante",
       entidad: "usuarios",
       entidadId: usuario.id,
       datos: { ip, alumno: body.alumno.nombre },

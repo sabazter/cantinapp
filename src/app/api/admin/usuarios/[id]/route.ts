@@ -9,7 +9,7 @@ import { audit, AuditEvent } from "@/lib/audit";
 const editarUsuarioSchema = z.object({
   nombre:   z.string().min(2).max(100).optional(),
   telefono: z.string().max(20).nullable().optional(),
-  rol:      z.enum(["admin", "vendedor", "representante", "directivo"]).optional(),
+  rol:      z.enum(["admin", "vendedor", "representante", "directivo", "profesor"]).optional(),
   activo:   z.boolean().optional(),
   password: z.string().min(8).max(72).optional(),
 });
@@ -63,10 +63,23 @@ export const PUT = withAuth(async (req: NextRequest, session, { params }: { para
   }
 
   if (body.activo === false) {
+    // Desactivar también al Alumno asociado
+    await supabase.from("alumnos").update({ activo: false }).eq("representante_id", id);
     await audit({
       usuarioId: session.user.id,
       cantinaId: session.user.cantinaId ?? undefined,
       evento:    AuditEvent.USUARIO_DESACTIVADO,
+      entidad:   "usuario",
+      entidadId: id,
+      datos:     { email: target.email },
+    });
+  } else if (body.activo === true) {
+    // Activar también al Alumno asociado
+    await supabase.from("alumnos").update({ activo: true }).eq("representante_id", id);
+    await audit({
+      usuarioId: session.user.id,
+      cantinaId: session.user.cantinaId ?? undefined,
+      evento:    "usuario_activado",
       entidad:   "usuario",
       entidadId: id,
       datos:     { email: target.email },

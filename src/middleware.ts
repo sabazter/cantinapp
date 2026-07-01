@@ -13,7 +13,7 @@ const ROLE_REDIRECTS: Record<string, string> = {
 const PROTECTED_PREFIXES: Record<string, string[]> = {
   "/admin":      ["admin", "superadmin"],
   "/caja":       ["vendedor", "admin", "superadmin"],
-  "/portal":     ["representante"],
+  "/portal":     ["representante", "profesor"],
   "/reportes":   ["directivo", "admin", "superadmin"],
   "/superadmin": ["superadmin"],
 };

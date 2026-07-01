@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Pencil, Ban, KeyRound } from "lucide-react";
+import { Plus, Pencil, Ban, KeyRound, UserCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,14 +43,14 @@ const crearSchema = z.object({
   nombre:   z.string().min(2, "Mínimo 2 caracteres"),
   email:    z.string().email("Email inválido"),
   password: z.string().min(8, "Mínimo 8 caracteres"),
-  rol:      z.enum(["admin", "vendedor", "representante", "directivo"]),
+  rol:      z.enum(["admin", "vendedor", "representante", "directivo", "profesor"]),
   telefono: z.string().max(20).optional(),
 });
 
 const editarSchema = z.object({
   nombre:   z.string().min(2, "Mínimo 2 caracteres"),
   telefono: z.string().max(20).optional(),
-  rol:      z.enum(["admin", "vendedor", "representante", "directivo"]),
+  rol:      z.enum(["admin", "vendedor", "representante", "directivo", "profesor"]),
 });
 
 const pwdSchema = z.object({
@@ -70,11 +70,12 @@ type PwdForm    = z.infer<typeof pwdSchema>;
 const ROL_LABEL: Record<string, string> = {
   admin: "Administrador", vendedor: "Vendedor",
   representante: "Representante", directivo: "Directivo", superadmin: "Super Admin",
+  profesor: "Profesor",
 };
 
 const ROL_COLOR: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   admin: "default", vendedor: "secondary", representante: "outline",
-  directivo: "outline", superadmin: "destructive",
+  directivo: "outline", superadmin: "destructive", profesor: "outline",
 };
 
 // ── Componente principal ──────────────────────────────────────────────────────
@@ -171,6 +172,23 @@ export function UsuariosClient() {
     }
   };
 
+  // ── Activar ────────────────────────────────────────────────────────────────
+  const onActivar = async (u: Usuario) => {
+    if (!confirm(`¿Activar la cuenta de ${u.nombre}?`)) return;
+    const res = await fetch(`/api/admin/usuarios/${u.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activo: true }),
+    });
+    if (res.ok) {
+      toast.success("Usuario activado");
+      fetchUsuarios();
+    } else {
+      const err = await res.json();
+      toast.error(err.error ?? "Error al activar");
+    }
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="p-6 space-y-6">
@@ -241,12 +259,19 @@ export function UsuariosClient() {
                         <DropdownMenuItem onClick={() => { pwdForm.reset(); setModalPwd(u); }}>
                           <KeyRound className="h-4 w-4 mr-2" /> Cambiar contraseña
                         </DropdownMenuItem>
-                        {u.activo && (
+                        {u.activo ? (
                           <DropdownMenuItem
                             className="text-destructive focus:text-destructive"
                             onClick={() => onDesactivar(u)}
                           >
                             <Ban className="h-4 w-4 mr-2" /> Desactivar
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            className="text-primary focus:text-primary font-semibold"
+                            onClick={() => onActivar(u)}
+                          >
+                            <UserCheck className="h-4 w-4 mr-2" /> Activar cuenta
                           </DropdownMenuItem>
                         )}
                       </DropdownMenuContent>
@@ -283,6 +308,7 @@ export function UsuariosClient() {
                   <SelectItem value="vendedor">Vendedor</SelectItem>
                   <SelectItem value="representante">Representante</SelectItem>
                   <SelectItem value="directivo">Directivo</SelectItem>
+                  <SelectItem value="profesor">Profesor</SelectItem>
                 </SelectContent>
               </Select>
             </FormField>
@@ -325,6 +351,7 @@ export function UsuariosClient() {
                   <SelectItem value="vendedor">Vendedor</SelectItem>
                   <SelectItem value="representante">Representante</SelectItem>
                   <SelectItem value="directivo">Directivo</SelectItem>
+                  <SelectItem value="profesor">Profesor</SelectItem>
                 </SelectContent>
               </Select>
             </FormField>

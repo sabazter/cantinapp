@@ -43,6 +43,7 @@ enum Rol {
   representante
   directivo
   superadmin
+  profesor
 }
 
 model Usuario {

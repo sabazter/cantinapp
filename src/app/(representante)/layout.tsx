@@ -5,7 +5,7 @@ import { AppSidebar } from "@/components/shared/app-sidebar";
 export default async function RepresentanteLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session) redirect("/login");
-  if (session.user.rol !== "representante") redirect("/login");
+  if (session.user.rol !== "representante" && session.user.rol !== "profesor") redirect("/login");
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

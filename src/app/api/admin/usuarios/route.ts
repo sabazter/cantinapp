@@ -10,7 +10,7 @@ const crearUsuarioSchema = z.object({
   nombre:   z.string().min(2).max(100),
   email:    z.email(),
   password: z.string().min(8).max(72),
-  rol:      z.enum(["admin", "vendedor", "representante", "directivo"]),
+  rol:      z.enum(["admin", "vendedor", "representante", "directivo", "profesor"]),
   telefono: z.string().max(20).optional(),
 });
 

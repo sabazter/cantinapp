@@ -58,6 +58,9 @@ const NAV_ITEMS: Record<string, NavItem[]> = {
   representante: [
     { label: "Mi portal", href: "/portal", icon: LayoutDashboard },
   ],
+  profesor: [
+    { label: "Mi portal", href: "/portal", icon: LayoutDashboard },
+  ],
   directivo: [
     { label: "Reportes", href: "/reportes", icon: BarChart3 },
   ],
@@ -69,6 +72,7 @@ const ROL_LABEL: Record<string, string> = {
   vendedor: "Vendedor",
   representante: "Representante",
   directivo: "Directivo",
+  profesor: "Profesor",
 };
 
 interface AppSidebarProps {
