@@ -21,9 +21,9 @@ const cantinSchema = z.object({
   nombre:           z.string().min(1, "Requerido").max(100),
   escuela:          z.string().min(1, "Requerido").max(200),
   direccion:        z.string().max(300).optional(),
-  limite_fiado_usd: z.number({ invalid_type_error: "Número requerido" }).min(0),
-  umbral_deuda_usd: z.number({ invalid_type_error: "Número requerido" }).min(0),
-  tasa_manual:      z.number({ invalid_type_error: "Número requerido" }).positive().nullable().optional(),
+  limite_fiado_usd: z.number({ message: "Número requerido" }).min(0),
+  umbral_deuda_usd: z.number({ message: "Número requerido" }).min(0),
+  tasa_manual:      z.number({ message: "Número requerido" }).positive().nullable().optional(),
   notif_email:      z.boolean(),
   notif_whatsapp:   z.boolean(),
 });

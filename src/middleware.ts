@@ -20,7 +20,7 @@ const PROTECTED_PREFIXES: Record<string, string[]> = {
 
 let _cachedPublicKey: Awaited<ReturnType<typeof importSPKI>> | null = null;
 
-async function decodeRS256Token(token: string) {
+async function decodeRS256Token(token: string): Promise<any> {
   try {
     if (!_cachedPublicKey) {
       const pem = (process.env.NEXTAUTH_PUBLIC_KEY ?? "").replace(/\\n/g, "\n");

@@ -435,7 +435,7 @@ function TabDeudas() {
                   onChange={e => setBusqueda(e.target.value)}
                   className="h-8 rounded-md border border-input bg-background px-3 text-xs flex-1 min-w-[140px] outline-none focus:ring-1 focus:ring-ring"
                 />
-                <Select value={filtroCurso} onValueChange={setFiltroCurso}>
+                <Select value={filtroCurso} onValueChange={v => setFiltroCurso(v ?? "todos")}>
                   <SelectTrigger className="h-8 w-[140px] text-xs">
                     <SelectValue placeholder="Curso" />
                   </SelectTrigger>
@@ -444,7 +444,7 @@ function TabDeudas() {
                     {cursos.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Select value={filtroRango} onValueChange={setFiltroRango}>
+                <Select value={filtroRango} onValueChange={v => setFiltroRango(v ?? "todos")}>
                   <SelectTrigger className="h-8 w-[140px] text-xs">
                     <SelectValue placeholder="Antigüedad" />
                   </SelectTrigger>
