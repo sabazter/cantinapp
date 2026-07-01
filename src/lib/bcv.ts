@@ -50,7 +50,7 @@ export async function scrapeBcv(): Promise<number> {
 
   if (isNaN(tasa) || tasa <= 0) throw new Error(`Tasa inválida: "${raw}"`);
 
-  return tasa;
+  return Math.round(tasa * 100) / 100;
 }
 
 // Actualiza la tasa del día para una cantina. Devuelve la tasa usada.

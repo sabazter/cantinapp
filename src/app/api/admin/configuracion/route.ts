@@ -48,7 +48,7 @@ export const PUT = withAuth(async (req: NextRequest, session) => {
       umbral_deuda_usd: body.umbral_deuda_usd,
       notif_email:      body.notif_email,
       notif_whatsapp:   body.notif_whatsapp,
-      tasa_manual:      body.tasa_manual ?? null,
+      tasa_manual:      body.tasa_manual ? Math.round(body.tasa_manual * 100) / 100 : null,
       updated_at:       new Date().toISOString(),
     })
     .eq("id", cantinaId);

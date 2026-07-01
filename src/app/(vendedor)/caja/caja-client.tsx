@@ -650,7 +650,7 @@ export function CajaClient() {
                 </div>
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">Tasa BCV</span>
-                  <span>{lastRecibo.tasa.toFixed(4)}</span>
+                  <span>{lastRecibo.tasa.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">Referencia</span>
