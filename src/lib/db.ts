@@ -8,7 +8,7 @@ import pg from "pg";
 dns.setDefaultResultOrder("ipv4first");
 
 function makePool() {
-  const url = new URL(process.env.DATABASE_URL!);
+  const url = new URL(process.env.DATABASE_URL || "postgresql://postgres:dummy@localhost:5432/postgres");
   const pool = new pg.Pool({
     host: url.hostname,
     port: parseInt(url.port) || 5432,
