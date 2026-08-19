@@ -10,6 +10,6 @@ services:
     container_name: cantinapp
     restart: always
     ports:
-      - "3001:3000"
+      - "3005:3000"
     env_file:
       - .env
