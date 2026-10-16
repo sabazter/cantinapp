@@ -66,6 +66,15 @@ export const POST = withAuth(async (req: NextRequest, session) => {
   const cantinaId = session.user.cantinaId!;
   const body = await validateBody(req, alumnoSchema);
 
+  // El representante, si viene, debe ser de esta misma cantina (evita vincular usuarios ajenos)
+  if (body.representanteId) {
+    const rep = await db.usuario.findFirst({
+      where: { id: body.representanteId, cantinaId, rol: { in: ["representante", "profesor"] } },
+      select: { id: true },
+    });
+    if (!rep) return NextResponse.json({ error: "Representante no válido" }, { status: 400 });
+  }
+
   const cedulaEncriptada = encrypt(body.cedula);
 
   // Alumno + cuenta corriente en una sola operación; el QR usa el ID generado

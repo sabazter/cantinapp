@@ -1,6 +1,10 @@
 // Plantillas de email — sin datos financieros en el cuerpo (§9.2)
 // Los montos/saldos exactos solo se muestran dentro del portal autenticado.
 
+// Escapa datos de usuario antes de insertarlos en HTML (nombres, motivos, correos)
+const esc = (v: string | number) =>
+  String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
 const BASE_URL = process.env.NEXTAUTH_URL ?? "https://cantinapp.com";
 
 const base = (content: string) => `
@@ -32,7 +36,7 @@ const base = (content: string) => `
 export const emailFiadoRegistrado = (alumnoNombre: string) => ({
   subject: `Compra registrada — ${alumnoNombre}`,
   html: base(`
-    <p>Se registró una compra a crédito (fiado) para <strong>${alumnoNombre}</strong>.</p>
+    <p>Se registró una compra a crédito (fiado) para <strong>${esc(alumnoNombre)}</strong>.</p>
     <p>Para ver el detalle y el saldo actualizado, ingresa a tu portal.</p>
     <a href="${BASE_URL}/portal" class="btn">Ver mi portal</a>
     <p style="margin-top:16px; font-size:13px; color:#6b7280;">
@@ -45,7 +49,7 @@ export const emailFiadoRegistrado = (alumnoNombre: string) => ({
 export const emailAbonoConfirmado = (alumnoNombre: string) => ({
   subject: `Abono confirmado — ${alumnoNombre}`,
   html: base(`
-    <p>El pago que reportaste para <strong>${alumnoNombre}</strong> fue <strong>confirmado</strong> por el administrador.</p>
+    <p>El pago que reportaste para <strong>${esc(alumnoNombre)}</strong> fue <strong>confirmado</strong> por el administrador.</p>
     <p>El saldo actualizado ya está disponible en tu portal.</p>
     <a href="${BASE_URL}/portal" class="btn">Ver mi portal</a>
   `),
@@ -55,8 +59,8 @@ export const emailAbonoConfirmado = (alumnoNombre: string) => ({
 export const emailAbonoRechazado = (alumnoNombre: string, motivo: string) => ({
   subject: `Abono no procesado — ${alumnoNombre}`,
   html: base(`
-    <p>El pago que reportaste para <strong>${alumnoNombre}</strong> no pudo ser procesado.</p>
-    <p><strong>Motivo:</strong> ${motivo}</p>
+    <p>El pago que reportaste para <strong>${esc(alumnoNombre)}</strong> no pudo ser procesado.</p>
+    <p><strong>Motivo:</strong> ${esc(motivo)}</p>
     <p>Por favor comunícate con la cantina para resolver la situación.</p>
     <a href="${BASE_URL}/portal" class="btn">Ver mi portal</a>
   `),
@@ -68,7 +72,7 @@ export const emailStockBajo = (productos: { nombre: string; stock: number; stock
   html: base(`
     <p>Los siguientes productos están por debajo del stock mínimo:</p>
     <ul>
-      ${productos.map(p => `<li><strong>${p.nombre}</strong>: ${p.stock} unidades (mínimo: ${p.stockMin})</li>`).join("")}
+      ${productos.map(p => `<li><strong>${esc(p.nombre)}</strong>: ${p.stock} unidades (mínimo: ${p.stockMin})</li>`).join("")}
     </ul>
     <a href="${BASE_URL}/admin/inventario" class="btn">Ir a Inventario</a>
   `),
@@ -82,7 +86,7 @@ export const emailResumenDiario = (
 ) => ({
   subject: `Resumen del día ${fecha} — ${cantinaName}`,
   html: base(`
-    <p>Resumen de ventas del día <strong>${fecha}</strong> en <strong>${cantinaName}</strong>:</p>
+    <p>Resumen de ventas del día <strong>${fecha}</strong> en <strong>${esc(cantinaName)}</strong>:</p>
     <ul>
       <li>Total de ventas: <strong>${totales.count}</strong></li>
       <li>Ingreso total: <strong>$${totales.totalUsd.toFixed(2)}</strong></li>
@@ -95,7 +99,7 @@ export const emailResumenDiario = (
 export const emailCuentaBloqueada = (emailAdmin: string, emailBloqueado: string) => ({
   subject: `🔒 Cuenta bloqueada — ${emailBloqueado}`,
   html: base(`
-    <p>La cuenta <strong>${emailBloqueado}</strong> fue bloqueada automáticamente por múltiples intentos fallidos de inicio de sesión.</p>
+    <p>La cuenta <strong>${esc(emailBloqueado)}</strong> fue bloqueada automáticamente por múltiples intentos fallidos de inicio de sesión.</p>
     <p>Si fue un intento no autorizado, te recomendamos revisar los registros de auditoría.</p>
     <a href="${BASE_URL}/admin/configuracion" class="btn">Ir a Configuración</a>
   `),
@@ -132,7 +136,7 @@ export const emailVerificacion = (token: string) => ({
 export const emailBienvenidaRepresentante = (nombre: string, verToken: string) => ({
   subject: "Bienvenido a CantinApp — Verifica tu correo",
   html: base(`
-    <p>Hola <strong>${nombre}</strong>,</p>
+    <p>Hola <strong>${esc(nombre)}</strong>,</p>
     <p>Tu cuenta de representante ha sido creada exitosamente. Ya puedes acceder al portal
     para consultar el saldo y el historial de compras de tus hijos.</p>
     <p>Por favor verifica tu dirección de correo haciendo clic en el botón:</p>
@@ -149,9 +153,9 @@ export const emailNuevoRegistroAdmin = (repNombre: string, repEmail: string, alu
   html: base(`
     <p>Se ha registrado un nuevo representante en la cantina:</p>
     <ul style="color:#374151; font-size:14px; line-height:2;">
-      <li><strong>Nombre:</strong> ${repNombre}</li>
-      <li><strong>Email:</strong> ${repEmail}</li>
-      <li><strong>Alumno:</strong> ${alumnoNombre}</li>
+      <li><strong>Nombre:</strong> ${esc(repNombre)}</li>
+      <li><strong>Email:</strong> ${esc(repEmail)}</li>
+      <li><strong>Alumno:</strong> ${esc(alumnoNombre)}</li>
     </ul>
     <p>Recuerda habilitar el fiado para el alumno si corresponde desde el panel.</p>
     <a href="${BASE_URL}/admin/alumnos" class="btn">Ver alumnos</a>
@@ -162,7 +166,7 @@ export const emailNuevoRegistroAdmin = (repNombre: string, repEmail: string, alu
 export const emailBienvenidaProfesor = (nombre: string, verToken: string) => ({
   subject: "Bienvenido a CantinApp — Verifica tu correo",
   html: base(`
-    <p>Hola <strong>${nombre}</strong>,</p>
+    <p>Hola <strong>${esc(nombre)}</strong>,</p>
     <p>Tu cuenta de profesor ha sido registrada exitosamente. Para completar tu registro, por favor verifica tu dirección de correo haciendo clic en el botón:</p>
     <a href="${BASE_URL}/verificar-email?token=${verToken}" class="btn">Verificar mi correo</a>
     <p style="margin-top:16px; font-size:13px; color:#6b7280;">
@@ -177,8 +181,8 @@ export const emailNuevoRegistroProfesorAdmin = (profNombre: string, profEmail: s
   html: base(`
     <p>Se ha registrado un nuevo profesor en la cantina y está pendiente de activación:</p>
     <ul style="color:#374151; font-size:14px; line-height:2;">
-      <li><strong>Nombre:</strong> ${profNombre}</li>
-      <li><strong>Email:</strong> ${profEmail}</li>
+      <li><strong>Nombre:</strong> ${esc(profNombre)}</li>
+      <li><strong>Email:</strong> ${esc(profEmail)}</li>
     </ul>
     <p>Por favor, revisa y activa su cuenta desde el panel de usuarios para que pueda acceder.</p>
     <a href="${BASE_URL}/admin/usuarios" class="btn">Ver usuarios</a>
@@ -189,7 +193,7 @@ export const emailNuevoRegistroProfesorAdmin = (profNombre: string, profEmail: s
 export const emailSolicitudEliminacion = (nombre: string, email: string) => ({
   subject: "Solicitud de eliminación de datos — CantinApp",
   html: base(`
-    <p>El representante <strong>${nombre}</strong> (${email}) ha solicitado la eliminación de su cuenta y sus datos personales.</p>
+    <p>El representante <strong>${esc(nombre)}</strong> (${esc(email)}) ha solicitado la eliminación de su cuenta y sus datos personales.</p>
     <p>Por favor gestiona esta solicitud desde el panel de administración.</p>
     <p style="margin-top:16px; font-size:13px; color:#6b7280;">
       Según las políticas de privacidad, esta solicitud debe procesarse en un plazo de 30 días.

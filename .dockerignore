@@ -14,3 +14,4 @@ skills-lock.json
 uploads
 *.log
 .claude
+.env.app

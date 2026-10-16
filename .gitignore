@@ -41,3 +41,4 @@ next-env.d.ts
 # archivos subidos y logs
 /uploads
 *.log
+.env.app

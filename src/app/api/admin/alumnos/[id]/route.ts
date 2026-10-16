@@ -79,6 +79,15 @@ export const PUT = withAuth(async (req: NextRequest, session, { params }: Ctx) =
 
   const body = await validateBody(req, editSchema);
 
+  // El representante, si viene, debe ser de esta misma cantina
+  if (body.representanteId) {
+    const rep = await db.usuario.findFirst({
+      where: { id: body.representanteId, cantinaId, rol: { in: ["representante", "profesor"] } },
+      select: { id: true },
+    });
+    if (!rep) return NextResponse.json({ error: "Representante no válido" }, { status: 400 });
+  }
+
   await db.alumno.update({
     where: { id },
     data: {

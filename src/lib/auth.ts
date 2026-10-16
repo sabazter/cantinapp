@@ -67,6 +67,22 @@ export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt", maxAge: ACCESS_TOKEN_TTL },
   pages: { signIn: "/login" },
 
+  // Cookie de sesión: HttpOnly + SameSite=Strict; Secure cuando NEXTAUTH_URL es https.
+  // El nombre es el mismo que usa NextAuth por defecto (lo lee también el middleware).
+  cookies: {
+    sessionToken: {
+      name: process.env.NEXTAUTH_URL?.startsWith("https://")
+        ? "__Secure-next-auth.session-token"
+        : "next-auth.session-token",
+      options: {
+        httpOnly: true,
+        sameSite: "strict",
+        path: "/",
+        secure: process.env.NEXTAUTH_URL?.startsWith("https://") ?? false,
+      },
+    },
+  },
+
   providers: [
     CredentialsProvider({
       name: "credentials",

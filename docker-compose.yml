@@ -59,8 +59,10 @@ services:
     restart: always
     ports:
       - "3005:3000"
+    # Solo los secretos de la app. `.env` (contraseñas de Postgres/Redis, usadas por compose para
+    # sustituir variables) NO se pasa al contenedor: la app nunca ve la contraseña del dueño.
     env_file:
-      - .env
+      - .env.app
     environment:
       # Tienen prioridad sobre lo que haya en .env
       DATABASE_URL: postgresql://cantinapp_app:${APP_DB_PASSWORD}@postgres:5432/cantinapp

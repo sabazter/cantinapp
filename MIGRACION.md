@@ -30,16 +30,41 @@ El contenedor de la app **no recibe** credenciales de superusuario. `cantinapp_a
 
 Dentro de una misma request las consultas deben ir **en serie** (no `Promise.all` sobre `db`): comparten la conexión de la transacción.
 
-## Variables de entorno nuevas (`.env` del servidor)
+## Archivos de entorno (dos, a propósito)
 
-```
-POSTGRES_PASSWORD=   APP_DB_PASSWORD=   SYSTEM_DB_PASSWORD=   REDIS_PASSWORD=   (hex aleatorios)
-TRUST_PROXY=false    # "true" solo si hay un proxy/túnel que fija x-forwarded-for
-```
+| Archivo | Lo lee | Contenido |
+|---|---|---|
+| `.env` | `docker compose` (sustitución de variables) | `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `SYSTEM_DB_PASSWORD`, `REDIS_PASSWORD` |
+| `.env.app` | el contenedor `cantinapp` (`env_file`) | `NEXTAUTH_*`, `ENCRYPTION_KEY`, `INTERNAL_API_KEY`, `TRUST_PROXY`, Resend/Twilio |
 
-`DATABASE_URL`, `DATABASE_SYSTEM_URL`, `REDIS_URL` y `UPLOADS_DIR` los inyecta `docker-compose.yml`. Se eliminan `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` y `SUPABASE_SERVICE_ROLE_KEY`. Se conservan `NEXTAUTH_*`, `ENCRYPTION_KEY` e `INTERNAL_API_KEY`.
+La app **nunca** recibe las contraseñas de Postgres ni de Redis como variables sueltas: solo las URLs de su rol (`DATABASE_URL`, `DATABASE_SYSTEM_URL`, `REDIS_URL`), que inyecta `docker-compose.yml`. Ver `.env.example` y `.env.app.example`. Se eliminan `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` y `DIRECT_URL`.
 
-> `TRUST_PROXY=false` hace que todas las peticiones compartan la IP `unknown`: el límite por IP se vuelve global. Mientras tanto el login también se limita **por email**, así que no depende solo de la IP. Si la app queda detrás de Cloudflare/Tailscale Funnel/nginx, activar `true`.
+> `TRUST_PROXY=false` (sin proxy): las cabeceras `x-forwarded-for` se ignoran porque cualquiera puede falsificarlas. El límite por IP funciona como un cupo común; el login además se limita por email.
+
+## Checklist de salida a producción (20 puntos)
+
+| # | Punto | Estado |
+|---|---|---|
+| 1 | Ocultar API keys | ✅ Solo en `.env`/`.env.app` (fuera de git y de la imagen); sin llaves en el código |
+| 2 | Eliminar secretos de Git | ✅ Historial sin llaves ni `.env`; scripts con la `service_role` borrados (nunca se versionaron) |
+| 3 | Key pública para DB | ✅ N/A: ya no hay cliente de BD en el navegador ni `anon key` |
+| 4 | Row-Level Security | ✅ Deny-all + políticas por cantina y por rol, `FORCE`, 3 roles de Postgres |
+| 5 | Encriptar datos sensibles | ✅ AES-256-GCM en cédulas y referencias (falla cerrado). ⚠️ `mfa_secret` aún en claro |
+| 6 | Forzar autenticación | ✅ `withAuth` en todas las rutas privadas + middleware en páginas |
+| 7 | Restringir acceso a registros | ✅ RLS + filtros en la query; representantes solo ven a sus hijos |
+| 8 | Bloquear manipulación de campos | ✅ Zod con campos explícitos; `cantina_id` siempre del JWT; `representanteId` validado contra la cantina |
+| 9 | Proteger cookies de sesión | ✅ HttpOnly + SameSite=Strict. ⚠️ `Secure` solo con HTTPS (ver 19) |
+| 10 | Hashear contraseñas | ✅ bcrypt cost 12 |
+| 11 | Rate limiting | ✅ Redis: login, registro, recuperar contraseña y global |
+| 12 | Protección contra bots | ❌ Sin CAPTCHA/Turnstile (solo rate limiting) |
+| 13 | Parametrizar queries | ✅ Prisma y `$queryRaw` con parámetros |
+| 14 | Validar inputs | ✅ Zod en escritura; magic bytes en archivos |
+| 15 | Sanitizar contenido | ✅ React escapa la UI; plantillas de correo con `esc()` |
+| 16 | Restringir archivos | ✅ jpg/png/webp por contenido, 5 MB, volumen privado servido con sesión |
+| 17 | Devolver solo datos necesarios | ✅ `select` explícito; la cédula cifrada nunca sale en listas |
+| 18 | Security headers | ✅ XFO, nosniff, HSTS, Referrer, Permissions-Policy (cámara solo propia). ⚠️ CSP aún con `unsafe-inline`/`unsafe-eval` |
+| 19 | Forzar HTTPS | ❌ Sin proxy ni TLS el sitio va por HTTP: las cookies viajan en claro por la red local. Recomendado: `tailscale serve` o Caddy con certificado |
+| 20 | Escanear dependencias | ✅ `npm audit`: solo `xlsx` (sin parche; únicamente se usa para **escribir**, no para leer archivos) |
 
 ## Pruebas realizadas en local (stack completo con `docker compose up --build`)
 
