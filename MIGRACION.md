@@ -43,7 +43,7 @@ TRUST_PROXY=false    # "true" solo si hay un proxy/túnel que fija x-forwarded-f
 
 ## Pruebas realizadas en local (stack completo con `docker compose up --build`)
 
-Arranque desde cero (roles + `migrate deploy`) y 93 comprobaciones contra la app real: login con sesión RS256, venta, 6 ventas simultáneas con stock 3 (exactamente 3 pasan), 2 fiados simultáneos con límite (1 pasa), doble anulación (se revierte una vez), rollback de carrito parcial, aislamiento entre cantinas, registro con cédula cifrada, portal del representante, abonos, fotos (el contenido se valida por bytes), auditoría inmutable y los tres rate limits.
+Arranque desde cero (roles + `migrate deploy`) y 94 comprobaciones contra la app real: login con sesión RS256, venta, 6 ventas simultáneas con stock 3 (exactamente 3 pasan), 2 fiados simultáneos con límite (1 pasa), doble anulación (se revierte una vez), rollback de carrito parcial, aislamiento entre cantinas, registro con cédula cifrada, portal del representante, abonos, fotos (el contenido se valida por bytes), auditoría inmutable y los tres rate limits.
 
 ## Pendiente antes del deploy
 
