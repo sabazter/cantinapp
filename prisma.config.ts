@@ -11,6 +11,7 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // Las migraciones corren con el dueño del esquema, nunca con los roles de la app
+    url: process.env["DATABASE_ADMIN_URL"] ?? process.env["DATABASE_URL"],
   },
 });

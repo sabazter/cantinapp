@@ -1,12 +1,5 @@
-◇ injected env (1) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
-◇ injected env (12) from .env.local // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
-Loaded Prisma config from prisma.config.ts.
-
--- CreateSchema
-CREATE SCHEMA IF NOT EXISTS "public";
-
 -- CreateEnum
-CREATE TYPE "Rol" AS ENUM ('admin', 'vendedor', 'representante', 'directivo', 'superadmin');
+CREATE TYPE "Rol" AS ENUM ('admin', 'vendedor', 'representante', 'directivo', 'superadmin', 'profesor');
 
 -- CreateEnum
 CREATE TYPE "CategoriaProducto" AS ENUM ('tienda', 'menu');
@@ -65,6 +58,9 @@ CREATE TABLE "usuarios" (
     "mfa_secret" TEXT,
     "mfa_habilitado" BOOLEAN NOT NULL DEFAULT false,
     "email_verificado" BOOLEAN NOT NULL DEFAULT false,
+    "notif_email" BOOLEAN NOT NULL DEFAULT true,
+    "notif_whatsapp" BOOLEAN NOT NULL DEFAULT true,
+    "notas_crm" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -83,6 +79,18 @@ CREATE TABLE "refresh_tokens" (
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "refresh_tokens_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "password_reset_tokens" (
+    "id" TEXT NOT NULL,
+    "usuario_id" TEXT NOT NULL,
+    "token_hash" TEXT NOT NULL,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "used_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "password_reset_tokens_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -119,11 +127,12 @@ CREATE TABLE "alumnos" (
     "cantina_id" TEXT NOT NULL,
     "representante_id" TEXT,
     "nombre" TEXT NOT NULL,
-    "cedula_encriptada" TEXT NOT NULL,
+    "cedula_encriptada" TEXT,
     "curso" TEXT NOT NULL,
     "seccion" TEXT,
     "foto_url" TEXT,
     "qr_code" TEXT,
+    "fiado_habilitado" BOOLEAN NOT NULL DEFAULT false,
     "limite_fiado_usd" DECIMAL(10,2),
     "consentimiento_ip" TEXT,
     "consentimiento_at" TIMESTAMP(3),
@@ -153,6 +162,7 @@ CREATE TABLE "productos" (
     "nombre" TEXT NOT NULL,
     "categoria" "CategoriaProducto" NOT NULL DEFAULT 'tienda',
     "precio_usd" DECIMAL(10,4) NOT NULL,
+    "precio_jornada_usd" DECIMAL(10,4),
     "stock" INTEGER NOT NULL DEFAULT 0,
     "stock_min" INTEGER NOT NULL DEFAULT 5,
     "activo" BOOLEAN NOT NULL DEFAULT true,
@@ -265,6 +275,12 @@ CREATE UNIQUE INDEX "refresh_tokens_token_hash_key" ON "refresh_tokens"("token_h
 CREATE INDEX "refresh_tokens_usuario_id_idx" ON "refresh_tokens"("usuario_id");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "password_reset_tokens_token_hash_key" ON "password_reset_tokens"("token_hash");
+
+-- CreateIndex
+CREATE INDEX "password_reset_tokens_usuario_id_idx" ON "password_reset_tokens"("usuario_id");
+
+-- CreateIndex
 CREATE INDEX "login_intentos_email_created_at_idx" ON "login_intentos"("email", "created_at");
 
 -- CreateIndex
@@ -283,7 +299,16 @@ CREATE INDEX "audit_logs_evento_created_at_idx" ON "audit_logs"("evento", "creat
 CREATE INDEX "alumnos_cantina_id_idx" ON "alumnos"("cantina_id");
 
 -- CreateIndex
+CREATE INDEX "alumnos_representante_id_idx" ON "alumnos"("representante_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "cuentas_alumnos_alumno_id_key" ON "cuentas_alumnos"("alumno_id");
+
+-- CreateIndex
+CREATE INDEX "productos_cantina_id_idx" ON "productos"("cantina_id");
+
+-- CreateIndex
+CREATE INDEX "movimientos_inventario_producto_id_idx" ON "movimientos_inventario"("producto_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "tasas_bcv_cantina_id_fecha_key" ON "tasas_bcv"("cantina_id", "fecha");
@@ -291,11 +316,35 @@ CREATE UNIQUE INDEX "tasas_bcv_cantina_id_fecha_key" ON "tasas_bcv"("cantina_id"
 -- CreateIndex
 CREATE INDEX "ventas_cantina_id_created_at_idx" ON "ventas"("cantina_id", "created_at");
 
+-- CreateIndex
+CREATE INDEX "ventas_alumno_id_idx" ON "ventas"("alumno_id");
+
+-- CreateIndex
+CREATE INDEX "ventas_vendedor_id_idx" ON "ventas"("vendedor_id");
+
+-- CreateIndex
+CREATE INDEX "detalle_ventas_venta_id_idx" ON "detalle_ventas"("venta_id");
+
+-- CreateIndex
+CREATE INDEX "detalle_ventas_producto_id_idx" ON "detalle_ventas"("producto_id");
+
+-- CreateIndex
+CREATE INDEX "abonos_cuenta_alumno_id_idx" ON "abonos"("cuenta_alumno_id");
+
+-- CreateIndex
+CREATE INDEX "abonos_estado_idx" ON "abonos"("estado");
+
+-- CreateIndex
+CREATE INDEX "notificaciones_usuario_id_idx" ON "notificaciones"("usuario_id");
+
 -- AddForeignKey
 ALTER TABLE "usuarios" ADD CONSTRAINT "usuarios_cantina_id_fkey" FOREIGN KEY ("cantina_id") REFERENCES "cantinas"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_usuario_id_fkey" FOREIGN KEY ("usuario_id") REFERENCES "usuarios"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "password_reset_tokens" ADD CONSTRAINT "password_reset_tokens_usuario_id_fkey" FOREIGN KEY ("usuario_id") REFERENCES "usuarios"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_usuario_id_fkey" FOREIGN KEY ("usuario_id") REFERENCES "usuarios"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -341,4 +390,3 @@ ALTER TABLE "abonos" ADD CONSTRAINT "abonos_confirmado_por_fkey" FOREIGN KEY ("c
 
 -- AddForeignKey
 ALTER TABLE "notificaciones" ADD CONSTRAINT "notificaciones_usuario_id_fkey" FOREIGN KEY ("usuario_id") REFERENCES "usuarios"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-

@@ -70,6 +70,7 @@ model Usuario {
   abonosConfirmados Abono[]       @relation("AdminAbonos")
   notificaciones   Notificacion[]
   refreshTokens    RefreshToken[]
+  passwordResets   PasswordResetToken[]
   auditLogs        AuditLog[]
 
   @@map("usuarios")
@@ -93,6 +94,20 @@ model RefreshToken {
 
   @@index([usuarioId])
   @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  usuarioId  String    @map("usuario_id")
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  usedAt     DateTime? @map("used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  usuario    Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@map("password_reset_tokens")
 }
 
 model LoginIntento {
@@ -141,7 +156,7 @@ model Alumno {
   cantinaId           String    @map("cantina_id")
   representanteId     String?   @map("representante_id")
   nombre              String
-  cedulaEncriptada    String    @map("cedula_encriptada")
+  cedulaEncriptada    String?   @map("cedula_encriptada")
   curso               String
   seccion             String?
   fotoUrl             String?   @map("foto_url")
@@ -162,6 +177,7 @@ model Alumno {
   ventas           Venta[]
 
   @@index([cantinaId])
+  @@index([representanteId])
   @@map("alumnos")
 }
 
@@ -192,6 +208,7 @@ model Producto {
   nombre      String
   categoria   CategoriaProducto  @default(tienda)
   precioUsd   Decimal            @map("precio_usd") @db.Decimal(10, 4)
+  precioJornadaUsd Decimal?          @map("precio_jornada_usd") @db.Decimal(10, 4)
   stock       Int                @default(0)
   stockMin    Int                @default(5) @map("stock_min")
   activo      Boolean            @default(true)
@@ -202,6 +219,7 @@ model Producto {
   detalles    DetalleVenta[]
   movimientos MovimientoInventario[]
 
+  @@index([cantinaId])
   @@map("productos")
 }
 
@@ -224,6 +242,7 @@ model MovimientoInventario {
 
   producto    Producto        @relation(fields: [productoId], references: [id])
 
+  @@index([productoId])
   @@map("movimientos_inventario")
 }
 
@@ -283,6 +302,8 @@ model Venta {
   detalles     DetalleVenta[]
 
   @@index([cantinaId, createdAt])
+  @@index([alumnoId])
+  @@index([vendedorId])
   @@map("ventas")
 }
 
@@ -296,6 +317,8 @@ model DetalleVenta {
   venta             Venta    @relation(fields: [ventaId], references: [id])
   producto          Producto @relation(fields: [productoId], references: [id])
 
+  @@index([ventaId])
+  @@index([productoId])
   @@map("detalle_ventas")
 }
 
@@ -337,6 +360,8 @@ model Abono {
   cuentaAlumno    CuentaAlumno @relation(fields: [cuentaAlumnoId], references: [id])
   admin           Usuario?     @relation("AdminAbonos", fields: [confirmadoPor], references: [id])
 
+  @@index([cuentaAlumnoId])
+  @@index([estado])
   @@map("abonos")
 }
 
@@ -375,5 +400,6 @@ model Notificacion {
 
   usuario    Usuario             @relation(fields: [usuarioId], references: [id])
 
+  @@index([usuarioId])
   @@map("notificaciones")
 }
