@@ -18,6 +18,12 @@ Registro de todos los cambios realizados y planificados, más la documentación 
 
 ## Historial de Cambios
 
+### [2026-10-16] Seed de usuarios y datos demo
+**Tipo:** feat  
+**Módulo:** DB  
+**Archivos:** `prisma/seed.ts`, `package.json` (script `db:seed`)  
+**Descripción:** Seed idempotente (upsert) que crea la cantina "Unidad Educativa Demo", usuarios admin, vendedor, profesor y representante (`*@demo.cantinapp.com`, contraseña `Demo2026!`), 2 alumnos con cédula cifrada y cuenta, y 6 productos. Ejecutar con `npm run db:seed`. No usar en una BD con usuarios reales sin cambiar las contraseñas.
+
 ### [2026-05-15] Sprint 1.2 — Inventario completo
 **Tipo:** feat  
 **Módulo:** Inventario  
