@@ -10,30 +10,29 @@ export const GET = withAuth(async (_req: NextRequest, session) => {
   const hoy       = new Date().toISOString().slice(0, 10);
   const hace6d    = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
 
-  const [ventasHoy, ventasSemanaData, prodStock, alumnosActivos, fiadoPendiente] = await Promise.all([
-    db.venta.findMany({
-      where: { cantinaId, deletedAt: null, createdAt: rangoDia(hoy) },
-      select: { totalUsd: true, metodoPago: true },
-    }),
+  // Consultas en serie: comparten la conexión de la transacción del request
+  const ventasHoy = await db.venta.findMany({
+    where: { cantinaId, deletedAt: null, createdAt: rangoDia(hoy) },
+    select: { totalUsd: true, metodoPago: true },
+  });
 
-    db.venta.findMany({
-      where: { cantinaId, deletedAt: null, createdAt: { gte: rangoDia(hace6d).gte } },
-      select: { totalUsd: true, metodoPago: true, createdAt: true },
-    }),
+  const ventasSemanaData = await db.venta.findMany({
+    where: { cantinaId, deletedAt: null, createdAt: { gte: rangoDia(hace6d).gte } },
+    select: { totalUsd: true, metodoPago: true, createdAt: true },
+  });
 
-    db.producto.findMany({
-      where: { cantinaId, activo: true },
-      select: { stock: true, stockMin: true },
-    }),
+  const prodStock = await db.producto.findMany({
+    where: { cantinaId, activo: true },
+    select: { stock: true, stockMin: true },
+  });
 
-    db.alumno.count({ where: { cantinaId, activo: true, deletedAt: null } }),
+  const alumnosActivos = await db.alumno.count({ where: { cantinaId, activo: true, deletedAt: null } });
 
-    // Los abonos no tienen cantina_id propio: se resuelve a través del alumno
-    db.abono.findMany({
-      where: { estado: "pendiente", deletedAt: null, cuentaAlumno: { alumno: { cantinaId } } },
-      select: { montoUsd: true },
-    }),
-  ]);
+  // Los abonos no tienen cantina_id propio: se resuelve a través del alumno
+  const fiadoPendiente = await db.abono.findMany({
+    where: { estado: "pendiente", deletedAt: null, cuentaAlumno: { alumno: { cantinaId } } },
+    select: { montoUsd: true },
+  });
 
   // KPIs del día
   const ventasHoyUsd = ventasHoy.reduce((s, v) => s + v.totalUsd.toNumber(), 0);
