@@ -47,6 +47,7 @@ Arranque desde cero (roles + `migrate deploy`) y 94 comprobaciones contra la app
 
 ## Pendiente antes del deploy
 
-- Rebuild de la imagen tras el último ajuste (consultas en serie en dashboards) y repetir la pasada de humo; el daemon de Docker local se cayó por disco lleno (`C:` sin espacio) justo antes.
+- ~~Rebuild y repetir pruebas~~ **Hecho**: imagen reconstruida con el último código y baterías repetidas desde una BD vacía (44 + 46 + 4 + 7 comprobaciones, incluido el rol `superadmin` bajo RLS).
+- Aviso menor en los logs del contenedor: `pg` advierte (`DeprecationWarning`) de una consulta lanzada mientras otra sigue en curso en la misma conexión. No causa fallos hoy, pero dejará de funcionar en `pg@9`; hay que localizar la ruta que lo dispara (`NODE_OPTIONS=--trace-deprecation`).
 - `xlsx` sigue con advisories sin parche (`npm audit`): solo se usa para exportar.
 - No incluido a propósito (fuera del alcance acordado): MFA obligatorio para admin, refresh tokens/sesiones revocables, zona horaria `America/Caracas`, TLS verificado en el scraping del BCV, tests automatizados y CI.
