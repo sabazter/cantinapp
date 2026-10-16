@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { legacy } from "@/lib/legacy";
 
 const editarSchema = z.object({
   nombre:        z.string().min(1).max(120).optional(),
@@ -14,13 +15,8 @@ const editarSchema = z.object({
 });
 
 async function getProductoPropio(id: string, cantinaId: string) {
-  const supabase = createServerSupabase();
-  const { data } = await supabase
-    .from("productos")
-    .select("id, cantina_id")
-    .eq("id", id)
-    .single();
-  if (!data || data.cantina_id !== cantinaId) return null;
+  const data = await db.producto.findUnique({ where: { id }, select: { id: true, cantinaId: true } });
+  if (!data || data.cantinaId !== cantinaId) return null;
   return data;
 }
 
@@ -33,24 +29,24 @@ export const PUT = withAuth(async (req: NextRequest, session, { params }: { para
   }
 
   const body = await validateBody(req, editarSchema);
-  const updates: Record<string, unknown> = {};
-  if (body.nombre        !== undefined) updates.nombre              = body.nombre;
-  if (body.categoria     !== undefined) updates.categoria           = body.categoria;
-  if (body.precioUsd     !== undefined) updates.precio_usd          = body.precioUsd;
-  if ("precioJornada"    in  body)      updates.precio_jornada_usd  = body.precioJornada ?? null;
-  if (body.stockMin      !== undefined) updates.stock_min           = body.stockMin;
-  if (body.activo        !== undefined) updates.activo              = body.activo;
 
-  const supabase = createServerSupabase();
-  const { data, error } = await supabase
-    .from("productos")
-    .update(updates)
-    .eq("id", id)
-    .select("id, nombre, categoria, precio_usd, precio_jornada_usd, stock, stock_min, activo")
-    .single();
+  const data = await db.producto.update({
+    where: { id },
+    data: {
+      ...(body.nombre    !== undefined && { nombre: body.nombre }),
+      ...(body.categoria !== undefined && { categoria: body.categoria }),
+      ...(body.precioUsd !== undefined && { precioUsd: body.precioUsd }),
+      ...("precioJornada" in body       && { precioJornadaUsd: body.precioJornada ?? null }),
+      ...(body.stockMin  !== undefined && { stockMin: body.stockMin }),
+      ...(body.activo    !== undefined && { activo: body.activo }),
+    },
+    select: {
+      id: true, nombre: true, categoria: true, precioUsd: true, precioJornadaUsd: true,
+      stock: true, stockMin: true, activo: true,
+    },
+  });
 
-  if (error) throw error;
-  return NextResponse.json(data);
+  return NextResponse.json(legacy(data));
 });
 
 export const DELETE = withAuth(async (_req: NextRequest, session, { params }: { params: Promise<{ id: string }> }) => {
@@ -61,7 +57,6 @@ export const DELETE = withAuth(async (_req: NextRequest, session, { params }: { 
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
   }
 
-  const supabase = createServerSupabase();
-  await supabase.from("productos").update({ activo: false }).eq("id", id);
+  await db.producto.update({ where: { id }, data: { activo: false } });
   return new NextResponse(null, { status: 204 });
 });

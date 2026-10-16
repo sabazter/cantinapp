@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole, withAuth } from "@/lib/require-role";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -8,74 +8,64 @@ export const GET = withAuth(async (_req: NextRequest, session, { params }: Ctx) 
   requireRole(session, "admin", "superadmin");
   const { id } = await params;
   const cantinaId = session.user.cantinaId!;
-  const supabase = createServerSupabase();
 
   // Representante debe pertenecer a la misma cantina
-  const { data: rep } = await supabase
-    .from("usuarios")
-    .select("id, nombre, email, telefono, activo, email_verificado, notas_crm, created_at")
-    .eq("id", id)
-    .eq("cantina_id", cantinaId)
-    .eq("rol", "representante")
-    .single();
+  const rep = await db.usuario.findFirst({
+    where: { id, cantinaId, rol: "representante" },
+    select: {
+      id: true, nombre: true, email: true, telefono: true, activo: true,
+      emailVerificado: true, notasCrm: true, createdAt: true,
+    },
+  });
 
   if (!rep) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
   // Hijos (alumnos)
-  const { data: alumnos } = await supabase
-    .from("alumnos")
-    .select("id, nombre, curso, seccion, activo, fiado_habilitado, cuentas_alumnos(saldo)")
-    .eq("representante_id", id)
-    .eq("cantina_id", cantinaId)
-    .is("deleted_at", null)
-    .order("nombre");
+  const alumnosArr = await db.alumno.findMany({
+    where: { representanteId: id, cantinaId, deletedAt: null },
+    select: {
+      id: true, nombre: true, curso: true, seccion: true, activo: true, fiadoHabilitado: true,
+      cuenta: { select: { id: true, saldo: true } },
+    },
+    orderBy: { nombre: "asc" },
+  });
 
-  const alumnosArr = alumnos ?? [];
-  const cuentaIds: string[] = [];
-  for (const a of alumnosArr) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c = a.cuentas_alumnos as any;
-    const cid = Array.isArray(c) ? c[0]?.id : c?.id;
-    if (cid) cuentaIds.push(cid);
-  }
+  const cuentaIds = alumnosArr.flatMap(a => (a.cuenta ? [a.cuenta.id] : []));
 
   // Historial de abonos de todos sus hijos
-  const { data: abonos } = cuentaIds.length > 0
-    ? await supabase
-        .from("abonos")
-        .select("id, cuenta_alumno_id, monto_usd, metodo, estado, created_at")
-        .in("cuenta_alumno_id", cuentaIds)
-        .order("created_at", { ascending: false })
-        .limit(50)
-    : { data: [] };
+  const abonosArr = cuentaIds.length > 0
+    ? await db.abono.findMany({
+        where: { cuentaAlumnoId: { in: cuentaIds } },
+        select: { id: true, cuentaAlumnoId: true, montoUsd: true, metodo: true, estado: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      })
+    : [];
 
-  const abonosArr = abonos ?? [];
   const confirmados = abonosArr.filter(a => a.estado === "confirmado");
   const rechazados  = abonosArr.filter(a => a.estado === "rechazado");
-  const totalAbonadoUsd = confirmados.reduce((s, a) => s + Number(a.monto_usd), 0);
+  const totalAbonadoUsd = confirmados.reduce((s, a) => s + a.montoUsd.toNumber(), 0);
 
   // Canal preferido: cuál canal usó más en notificaciones
-  const { data: notifs } = await supabase
-    .from("notificaciones")
-    .select("canal, estado")
-    .eq("usuario_id", id)
-    .eq("estado", "enviado");
+  const notifs = await db.notificacion.findMany({
+    where: { usuarioId: id, estado: "enviado" },
+    select: { canal: true },
+  });
 
   const canalCount = { email: 0, whatsapp: 0 };
-  for (const n of notifs ?? []) {
+  for (const n of notifs) {
     if (n.canal === "email") canalCount.email++;
     else canalCount.whatsapp++;
   }
   const canalPreferido = canalCount.whatsapp >= canalCount.email ? "whatsapp" : "email";
-  const totalNotificaciones = (notifs ?? []).length;
+  const totalNotificaciones = notifs.length;
 
   // Calificación de responsabilidad financiera
   const totalAbonos = abonosArr.length;
   const tasaRechazo = totalAbonos > 0 ? rechazados.length / totalAbonos : 0;
+  const saldoDe = (a: (typeof alumnosArr)[number]) => a.cuenta?.saldo.toNumber() ?? 0;
   const deudaTotalHijos = alumnosArr.reduce((s, a) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c = a.cuentas_alumnos as any;
-    const saldo = Number(Array.isArray(c) ? c[0]?.saldo ?? 0 : c?.saldo ?? 0);
+    const saldo = saldoDe(a);
     return s + (saldo < 0 ? Math.abs(saldo) : 0);
   }, 0);
 
@@ -93,10 +83,7 @@ export const GET = withAuth(async (_req: NextRequest, session, { params }: Ctx) 
   // Mapeo cuentaId → nombre de alumno para el historial
   const cuentaToAlumno = new Map<string, string>();
   for (const a of alumnosArr) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c = a.cuentas_alumnos as any;
-    const cid = Array.isArray(c) ? c[0]?.id : c?.id;
-    if (cid) cuentaToAlumno.set(cid, a.nombre);
+    if (a.cuenta) cuentaToAlumno.set(a.cuenta.id, a.nombre);
   }
 
   return NextResponse.json({
@@ -106,27 +93,22 @@ export const GET = withAuth(async (_req: NextRequest, session, { params }: Ctx) 
       email: rep.email,
       telefono: rep.telefono,
       activo: rep.activo,
-      emailVerificado: rep.email_verificado,
-      notasCrm: rep.notas_crm ?? "",
-      createdAt: rep.created_at,
+      emailVerificado: rep.emailVerificado,
+      notasCrm: rep.notasCrm ?? "",
+      createdAt: rep.createdAt.toISOString(),
     },
-    hijos: alumnosArr.map(a => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const c = a.cuentas_alumnos as any;
-      const saldo = Number(Array.isArray(c) ? c[0]?.saldo ?? 0 : c?.saldo ?? 0);
-      return {
-        id: a.id, nombre: a.nombre, curso: a.curso, seccion: a.seccion,
-        activo: a.activo, fiadoHabilitado: a.fiado_habilitado, saldo,
-      };
-    }),
+    hijos: alumnosArr.map(a => ({
+      id: a.id, nombre: a.nombre, curso: a.curso, seccion: a.seccion,
+      activo: a.activo, fiadoHabilitado: a.fiadoHabilitado, saldo: saldoDe(a),
+    })),
     abonos: {
       historial: abonosArr.map(a => ({
         id: a.id,
-        alumnoNombre: cuentaToAlumno.get(a.cuenta_alumno_id) ?? "—",
-        montoUsd: Number(a.monto_usd),
+        alumnoNombre: cuentaToAlumno.get(a.cuentaAlumnoId) ?? "—",
+        montoUsd: a.montoUsd.toNumber(),
         metodo: a.metodo,
         estado: a.estado,
-        createdAt: a.created_at,
+        createdAt: a.createdAt.toISOString(),
       })),
       totalAbonadoUsd: Math.round(totalAbonadoUsd * 100) / 100,
       totalConfirmados: confirmados.length,

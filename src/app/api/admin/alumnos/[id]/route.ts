@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { legacy } from "@/lib/legacy";
 import { audit, AuditEvent } from "@/lib/audit";
 import { decrypt, encrypt } from "@/lib/crypto";
+import { eliminarArchivo } from "@/lib/storage";
 
 const editSchema = z.object({
   nombre:           z.string().min(1).max(100).optional(),
@@ -20,14 +22,12 @@ const editSchema = z.object({
 type Ctx = { params: Promise<{ id: string }> };
 
 async function verificarPropiedad(cantinaId: string, alumnoId: string) {
-  const supabase = createServerSupabase();
-  const { data } = await supabase
-    .from("alumnos")
-    .select("cantina_id, cedula_encriptada, deleted_at")
-    .eq("id", alumnoId)
-    .single();
+  const data = await db.alumno.findUnique({
+    where: { id: alumnoId },
+    select: { cantinaId: true, deletedAt: true },
+  });
 
-  if (!data || data.cantina_id !== cantinaId || data.deleted_at) return null;
+  if (!data || data.cantinaId !== cantinaId || data.deletedAt) return null;
   return data;
 }
 
@@ -40,17 +40,15 @@ export const GET = withAuth(async (_req: NextRequest, session, { params }: Ctx) 
   const alumno = await verificarPropiedad(cantinaId, id);
   if (!alumno) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
-  const supabase = createServerSupabase();
-  const { data } = await supabase
-    .from("alumnos")
-    .select(`
-      id, nombre, cedula_encriptada, curso, seccion,
-      foto_url, qr_code, fiado_habilitado, limite_fiado_usd, activo,
-      consentimiento_ip, consentimiento_at, created_at,
-      cuentas_alumnos ( saldo )
-    `)
-    .eq("id", id)
-    .single();
+  const data = await db.alumno.findUnique({
+    where: { id },
+    select: {
+      id: true, nombre: true, cedulaEncriptada: true, curso: true, seccion: true,
+      fotoUrl: true, qrCode: true, fiadoHabilitado: true, limiteFiadoUsd: true, activo: true,
+      consentimientoIp: true, consentimientoAt: true, createdAt: true,
+      cuenta: { select: { saldo: true } },
+    },
+  });
 
   if (!data) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
@@ -63,8 +61,11 @@ export const GET = withAuth(async (_req: NextRequest, session, { params }: Ctx) 
     datos:     { accion: "detalle" },
   });
 
-  const { cedula_encriptada, ...rest } = data;
-  return NextResponse.json({ ...rest, cedula: decrypt(cedula_encriptada) });
+  const { cedulaEncriptada, ...rest } = data;
+  return NextResponse.json({
+    ...legacy<Record<string, unknown>>(rest),
+    cedula: cedulaEncriptada ? decrypt(cedulaEncriptada) : null,
+  });
 });
 
 // PUT /api/admin/alumnos/[id]
@@ -78,19 +79,19 @@ export const PUT = withAuth(async (req: NextRequest, session, { params }: Ctx) =
 
   const body = await validateBody(req, editSchema);
 
-  const updates: Record<string, unknown> = {};
-  if (body.nombre           !== undefined) updates.nombre            = body.nombre;
-  if (body.cedula           !== undefined) updates.cedula_encriptada = encrypt(body.cedula);
-  if (body.curso            !== undefined) updates.curso             = body.curso;
-  if (body.seccion          !== undefined) updates.seccion           = body.seccion;
-  if (body.fiadoHabilitado  !== undefined) updates.fiado_habilitado  = body.fiadoHabilitado;
-  if (body.limiteFiadoUsd   !== undefined) updates.limite_fiado_usd  = body.limiteFiadoUsd;
-  if (body.representanteId  !== undefined) updates.representante_id  = body.representanteId;
-  if (body.activo           !== undefined) updates.activo            = body.activo;
-
-  const supabase = createServerSupabase();
-  const { error } = await supabase.from("alumnos").update(updates).eq("id", id);
-  if (error) throw error;
+  await db.alumno.update({
+    where: { id },
+    data: {
+      ...(body.nombre          !== undefined && { nombre: body.nombre }),
+      ...(body.cedula          !== undefined && { cedulaEncriptada: encrypt(body.cedula) }),
+      ...(body.curso           !== undefined && { curso: body.curso }),
+      ...(body.seccion         !== undefined && { seccion: body.seccion }),
+      ...(body.fiadoHabilitado !== undefined && { fiadoHabilitado: body.fiadoHabilitado }),
+      ...(body.limiteFiadoUsd  !== undefined && { limiteFiadoUsd: body.limiteFiadoUsd }),
+      ...(body.representanteId !== undefined && { representanteId: body.representanteId }),
+      ...(body.activo          !== undefined && { activo: body.activo }),
+    },
+  });
 
   return NextResponse.json({ ok: true });
 });
@@ -104,27 +105,16 @@ export const DELETE = withAuth(async (_req: NextRequest, session, { params }: Ct
   const alumno = await verificarPropiedad(cantinaId, id);
   if (!alumno) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
-  const supabase = createServerSupabase();
+  const previo = await db.alumno.findUnique({ where: { id }, select: { fotoUrl: true } });
 
-  // Soft delete alumno
-  await supabase.from("alumnos").update({
-    deleted_at: new Date().toISOString(),
-    deleted_by: session.user.id,
-    activo: false,
-  }).eq("id", id);
+  // Soft delete alumno (la foto se retira también del almacenamiento: menores de edad)
+  await db.alumno.update({
+    where: { id },
+    data: { deletedAt: new Date(), deletedBy: session.user.id, activo: false, fotoUrl: null },
+  });
 
-  // Intentar eliminar foto del storage si existe
-  const { data: alumnoData } = await supabase
-    .from("alumnos")
-    .select("foto_url")
-    .eq("id", id)
-    .single();
-
-  if (alumnoData?.foto_url) {
-    const fileName = alumnoData.foto_url.split("/").pop();
-    if (fileName) {
-      await supabase.storage.from("fotos-alumnos").remove([`${cantinaId}/${fileName}`]).catch(() => {});
-    }
+  if (previo?.fotoUrl) {
+    await eliminarArchivo("fotos-alumnos", previo.fotoUrl).catch(() => {});
   }
 
   await audit({

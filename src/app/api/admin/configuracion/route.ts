@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { legacy } from "@/lib/legacy";
 import { audit } from "@/lib/audit";
 
 const cantinSchema = z.object({
@@ -19,16 +20,17 @@ const cantinSchema = z.object({
 export const GET = withAuth(async (_req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin");
   const cantinaId = session.user.cantinaId!;
-  const supabase = createServerSupabase();
 
-  const { data, error } = await supabase
-    .from("cantinas")
-    .select("id, nombre, escuela, direccion, limite_fiado_usd, umbral_deuda_usd, notif_email, notif_whatsapp, tasa_manual")
-    .eq("id", cantinaId)
-    .single();
+  const data = await db.cantina.findUnique({
+    where: { id: cantinaId },
+    select: {
+      id: true, nombre: true, escuela: true, direccion: true, limiteFiadoUsd: true,
+      umbralDeudaUsd: true, notifEmail: true, notifWhatsapp: true, tasaManual: true,
+    },
+  });
 
-  if (error) return NextResponse.json({ error: "Error al cargar configuración" }, { status: 500 });
-  return NextResponse.json(data);
+  if (!data) return NextResponse.json({ error: "Error al cargar configuración" }, { status: 500 });
+  return NextResponse.json(legacy(data));
 });
 
 export const PUT = withAuth(async (req: NextRequest, session) => {
@@ -37,23 +39,19 @@ export const PUT = withAuth(async (req: NextRequest, session) => {
 
   const body = await validateBody(req, cantinSchema);
 
-  const supabase = createServerSupabase();
-  const { error } = await supabase
-    .from("cantinas")
-    .update({
-      nombre:           body.nombre,
-      escuela:          body.escuela,
-      direccion:        body.direccion ?? null,
-      limite_fiado_usd: body.limite_fiado_usd,
-      umbral_deuda_usd: body.umbral_deuda_usd,
-      notif_email:      body.notif_email,
-      notif_whatsapp:   body.notif_whatsapp,
-      tasa_manual:      body.tasa_manual ? Math.round(body.tasa_manual * 100) / 100 : null,
-      updated_at:       new Date().toISOString(),
-    })
-    .eq("id", cantinaId);
-
-  if (error) return NextResponse.json({ error: "Error al guardar" }, { status: 500 });
+  await db.cantina.update({
+    where: { id: cantinaId },
+    data: {
+      nombre:         body.nombre,
+      escuela:        body.escuela,
+      direccion:      body.direccion ?? null,
+      limiteFiadoUsd: body.limite_fiado_usd,
+      umbralDeudaUsd: body.umbral_deuda_usd,
+      notifEmail:     body.notif_email,
+      notifWhatsapp:  body.notif_whatsapp,
+      tasaManual:     body.tasa_manual ? Math.round(body.tasa_manual * 100) / 100 : null,
+    },
+  });
 
   await audit({
     usuarioId: session.user.id,

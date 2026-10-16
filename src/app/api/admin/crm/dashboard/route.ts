@@ -1,97 +1,82 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole, withAuth } from "@/lib/require-role";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
 
 // GET /api/admin/crm/dashboard
 // Resumen CRM: ventas hoy, fiado hoy, abonos hoy, deuda total, alertas activas
 export const GET = withAuth(async (_req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin");
   const cantinaId = session.user.cantinaId!;
-  const supabase = createServerSupabase();
 
   const hoyInicio = new Date();
   hoyInicio.setHours(0, 0, 0, 0);
-  const hoyIso = hoyInicio.toISOString();
 
-  const hace7 = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const hace7  = new Date(Date.now() - 7 * 86_400_000);
+  const hace14 = new Date(Date.now() - 14 * 86_400_000);
 
   // Ventas de hoy
-  const { data: ventasHoy } = await supabase
-    .from("ventas")
-    .select("id, total_usd, es_fiado")
-    .eq("cantina_id", cantinaId)
-    .is("deleted_at", null)
-    .gte("created_at", hoyIso);
-
-  const ventasHoyArr = ventasHoy ?? [];
+  const ventasHoyArr = await db.venta.findMany({
+    where: { cantinaId, deletedAt: null, createdAt: { gte: hoyInicio } },
+    select: { id: true, totalUsd: true, esFiado: true },
+  });
   const totalVentasHoy = ventasHoyArr.length;
-  const montoVentasHoyUsd = ventasHoyArr.reduce((s, v) => s + Number(v.total_usd), 0);
-  const fiadoHoyUsd = ventasHoyArr.filter(v => v.es_fiado).reduce((s, v) => s + Number(v.total_usd), 0);
+  const montoVentasHoyUsd = ventasHoyArr.reduce((s, v) => s + v.totalUsd.toNumber(), 0);
+  const fiadoHoyUsd = ventasHoyArr.filter(v => v.esFiado).reduce((s, v) => s + v.totalUsd.toNumber(), 0);
 
-  // Abonos de hoy
-  const { data: abonosHoy } = await supabase
-    .from("abonos")
-    .select("id, monto_usd, estado")
-    .gte("created_at", hoyIso);
-
-  const abonosHoyArr = abonosHoy ?? [];
+  // Abonos de hoy (de esta cantina, a través del alumno)
+  const abonosHoyArr = await db.abono.findMany({
+    where: { createdAt: { gte: hoyInicio }, cuentaAlumno: { alumno: { cantinaId } } },
+    select: { montoUsd: true, estado: true },
+  });
   const abonosHoyUsd = abonosHoyArr
     .filter(a => a.estado === "confirmado")
-    .reduce((s, a) => s + Number(a.monto_usd), 0);
+    .reduce((s, a) => s + a.montoUsd.toNumber(), 0);
 
   // Deuda total (saldo negativo en cuentas)
-  const { data: cuentas } = await supabase
-    .from("cuentas_alumnos")
-    .select("saldo, alumnos!inner(cantina_id, activo, deleted_at)")
-    .eq("alumnos.cantina_id", cantinaId)
-    .eq("alumnos.activo", true)
-    .is("alumnos.deleted_at", null);
+  const cuentas = await db.cuentaAlumno.findMany({
+    where: { alumno: { cantinaId, activo: true, deletedAt: null } },
+    select: { saldo: true },
+  });
 
   let deudaTotalUsd = 0;
   let alumnosEnDeuda = 0;
-  for (const c of cuentas ?? []) {
-    const s = Number(c.saldo);
+  for (const c of cuentas) {
+    const s = c.saldo.toNumber();
     if (s < 0) { deudaTotalUsd += Math.abs(s); alumnosEnDeuda++; }
   }
 
   // Umbral
-  const { data: cantina } = await supabase
-    .from("cantinas")
-    .select("umbral_deuda_usd")
-    .eq("id", cantinaId)
-    .single();
-  const umbral = Number(cantina?.umbral_deuda_usd ?? 20);
+  const cantina = await db.cantina.findUnique({
+    where: { id: cantinaId },
+    select: { umbralDeudaUsd: true },
+  });
+  const umbral = cantina?.umbralDeudaUsd.toNumber() ?? 20;
 
   // Tendencia semanal (últimos 7 días, agrupar por día)
-  const { data: ventasSemana } = await supabase
-    .from("ventas")
-    .select("total_usd, created_at")
-    .eq("cantina_id", cantinaId)
-    .is("deleted_at", null)
-    .gte("created_at", hace7)
-    .order("created_at");
+  const ventasSemana = await db.venta.findMany({
+    where: { cantinaId, deletedAt: null, createdAt: { gte: hace7 } },
+    select: { totalUsd: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
 
-  // Agrupar por fecha
   const tendencia: Record<string, number> = {};
-  for (const v of ventasSemana ?? []) {
-    const day = v.created_at.slice(0, 10);
-    tendencia[day] = (tendencia[day] ?? 0) + Number(v.total_usd);
+  for (const v of ventasSemana) {
+    const day = v.createdAt.toISOString().slice(0, 10);
+    tendencia[day] = (tendencia[day] ?? 0) + v.totalUsd.toNumber();
   }
   const tendenciaArr = Object.entries(tendencia).map(([fecha, total]) => ({ fecha, total: Math.round(total * 100) / 100 }));
 
   // Top 5 productos del día
-  const ventaIdsHoy = ventasHoyArr.map(v => v.id);
   let topProductosHoy: { nombre: string; cantidad: number }[] = [];
-  if (ventaIdsHoy.length > 0) {
-    const { data: detalles } = await supabase
-      .from("detalle_ventas")
-      .select("cantidad, productos(nombre)")
-      .in("venta_id", ventaIdsHoy);
+  if (ventasHoyArr.length > 0) {
+    const detalles = await db.detalleVenta.findMany({
+      where: { ventaId: { in: ventasHoyArr.map(v => v.id) } },
+      select: { cantidad: true, producto: { select: { nombre: true } } },
+    });
 
     const map = new Map<string, number>();
-    for (const d of detalles ?? []) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const nombre = (d.productos as any)?.nombre ?? "?";
+    for (const d of detalles) {
+      const nombre = d.producto?.nombre ?? "?";
       map.set(nombre, (map.get(nombre) ?? 0) + d.cantidad);
     }
     topProductosHoy = Array.from(map.entries())
@@ -114,24 +99,18 @@ export const GET = withAuth(async (_req: NextRequest, session) => {
   }
 
   // Alumnos inactivos (sin compras en 14 días)
-  const hace14 = new Date(Date.now() - 14 * 86_400_000).toISOString();
-  const { data: ultimasVentas } = await supabase
-    .from("ventas")
-    .select("alumno_id")
-    .eq("cantina_id", cantinaId)
-    .is("deleted_at", null)
-    .gte("created_at", hace14)
-    .not("alumno_id", "is", null);
+  const ultimasVentas = await db.venta.findMany({
+    where: { cantinaId, deletedAt: null, createdAt: { gte: hace14 }, alumnoId: { not: null } },
+    select: { alumnoId: true },
+  });
+  const alumnosActivosReciente = new Set(ultimasVentas.map(v => v.alumnoId));
 
-  const alumnosActivosReciente = new Set((ultimasVentas ?? []).map(v => v.alumno_id));
-  const { data: alumnosActivos } = await supabase
-    .from("alumnos")
-    .select("id")
-    .eq("cantina_id", cantinaId)
-    .eq("activo", true)
-    .is("deleted_at", null);
+  const alumnosActivos = await db.alumno.findMany({
+    where: { cantinaId, activo: true, deletedAt: null },
+    select: { id: true },
+  });
 
-  const inactivos = (alumnosActivos ?? []).filter(a => !alumnosActivosReciente.has(a.id)).length;
+  const inactivos = alumnosActivos.filter(a => !alumnosActivosReciente.has(a.id)).length;
   if (inactivos > 0) {
     alertas.push({
       tipo: "inactividad",

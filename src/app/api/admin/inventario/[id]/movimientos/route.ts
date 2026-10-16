@@ -1,33 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole, withAuth } from "@/lib/require-role";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { legacy } from "@/lib/legacy";
 
 // GET /api/admin/inventario/[id]/movimientos
 export const GET = withAuth(async (_req: NextRequest, session, { params }: { params: Promise<{ id: string }> }) => {
   requireRole(session, "admin", "superadmin");
   const { id } = await params;
 
-  const supabase = createServerSupabase();
-
   // Verificar propiedad a través del producto
-  const { data: producto } = await supabase
-    .from("productos")
-    .select("cantina_id")
-    .eq("id", id)
-    .single();
+  const producto = await db.producto.findUnique({ where: { id }, select: { cantinaId: true } });
 
-  if (!producto || producto.cantina_id !== session.user.cantinaId) {
+  if (!producto || producto.cantinaId !== session.user.cantinaId) {
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
   }
 
-  const { data, error } = await supabase
-    .from("movimientos_inventario")
-    .select("id, tipo, cantidad, motivo, usuario_id, created_at")
-    .eq("producto_id", id)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(100);
+  const data = await db.movimientoInventario.findMany({
+    where: { productoId: id, deletedAt: null },
+    select: { id: true, tipo: true, cantidad: true, motivo: true, usuarioId: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
 
-  if (error) throw error;
-  return NextResponse.json(data);
+  return NextResponse.json(legacy(data));
 });

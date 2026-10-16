@@ -1,4 +1,4 @@
-import { createServerSupabase } from "@/lib/supabase-server";
+import { dbSystem } from "@/lib/db";
 import { notificarCuentaBloqueada } from "@/lib/notifications";
 
 const INTENTOS_BLOQUEO_TEMPORAL = 5;
@@ -13,25 +13,32 @@ interface EstadoBloqueo {
 }
 
 export async function verificarBloqueo(email: string): Promise<EstadoBloqueo> {
-  const supabase = createServerSupabase();
-  const desde = new Date(Date.now() - VENTANA_MINUTOS * 60 * 1000).toISOString();
+  const desde = new Date(Date.now() - VENTANA_MINUTOS * 60 * 1000);
 
-  const [{ count: intentosRecientes }, { count: totalFallidos }] = await Promise.all([
-    supabase
-      .from("login_intentos")
-      .select("*", { count: "exact", head: true })
-      .eq("email", email)
-      .eq("exitoso", false)
-      .gte("created_at", desde),
-    supabase
-      .from("login_intentos")
-      .select("*", { count: "exact", head: true })
-      .eq("email", email)
-      .eq("exitoso", false),
+  // Los fallos "acumulados" cuentan desde el último login exitoso: un usuario legítimo
+  // no queda bloqueado de por vida por errores antiguos.
+  const ultimoExito = await dbSystem.loginIntento.findFirst({
+    where: { email, exitoso: true },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+
+  const [recientes, total] = await Promise.all([
+    dbSystem.loginIntento.count({
+      where: {
+        email,
+        exitoso: false,
+        createdAt: { gte: ultimoExito && ultimoExito.createdAt > desde ? ultimoExito.createdAt : desde },
+      },
+    }),
+    dbSystem.loginIntento.count({
+      where: {
+        email,
+        exitoso: false,
+        ...(ultimoExito ? { createdAt: { gt: ultimoExito.createdAt } } : {}),
+      },
+    }),
   ]);
-
-  const recientes = intentosRecientes ?? 0;
-  const total = totalFallidos ?? 0;
 
   if (total >= INTENTOS_BLOQUEO_PERMANENTE) {
     return { bloqueado: true, permanente: true, intentosRestantes: 0 };
@@ -39,31 +46,23 @@ export async function verificarBloqueo(email: string): Promise<EstadoBloqueo> {
 
   // Notificar al admin cuando se alcanza el bloqueo temporal (primer disparo)
   if (recientes === INTENTOS_BLOQUEO_TEMPORAL) {
-    const supabase2 = createServerSupabase();
-    const { data: usuario } = await supabase2
-      .from("usuarios")
-      .select("cantina_id")
-      .eq("email", email)
-      .single();
-    notificarCuentaBloqueada(usuario?.cantina_id ?? null, email).catch(() => {});
+    const usuario = await dbSystem.usuario.findUnique({
+      where: { email },
+      select: { cantinaId: true },
+    });
+    notificarCuentaBloqueada(usuario?.cantinaId ?? null, email).catch(() => {});
   }
 
   if (recientes >= INTENTOS_BLOQUEO_TEMPORAL) {
-    const { data: ultimoIntento } = await supabase
-      .from("login_intentos")
-      .select("created_at")
-      .eq("email", email)
-      .eq("exitoso", false)
-      .gte("created_at", desde)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
+    const ultimoIntento = await dbSystem.loginIntento.findFirst({
+      where: { email, exitoso: false, createdAt: { gte: desde } },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    });
 
     const minutosParaDesbloqueo = ultimoIntento
       ? Math.ceil(
-          (VENTANA_MINUTOS * 60 * 1000 -
-            (Date.now() - new Date(ultimoIntento.created_at).getTime())) /
-            60000
+          (VENTANA_MINUTOS * 60 * 1000 - (Date.now() - ultimoIntento.createdAt.getTime())) / 60000
         )
       : VENTANA_MINUTOS;
 
@@ -87,6 +86,5 @@ export async function registrarIntento(
   ip: string,
   exitoso: boolean
 ): Promise<void> {
-  const supabase = createServerSupabase();
-  await supabase.from("login_intentos").insert({ email, ip, exitoso });
+  await dbSystem.loginIntento.create({ data: { email, ip, exitoso } });
 }

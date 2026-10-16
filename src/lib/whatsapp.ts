@@ -1,10 +1,8 @@
 import twilio from "twilio";
-import { createServerSupabase } from "./supabase-server";
+import { dbSystem } from "./db";
 
-const client = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+// Lazy: el constructor lanza si faltan las credenciales y sendWhatsApp ya las comprueba antes
+const getClient = () => twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
 const FROM = process.env.TWILIO_WHATSAPP_FROM ?? "whatsapp:+14155238886";
 
@@ -32,76 +30,59 @@ export async function sendWhatsApp(opts: EnviarOptions): Promise<void> {
     return;
   }
 
-  const supabase = createServerSupabase();
-  const hoy      = new Date().toISOString().slice(0, 10);
+  const hoy = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
 
   // Verificar rate limit diario (§9.3)
-  const { count: mensajesHoy } = await supabase
-    .from("notificaciones")
-    .select("*", { count: "exact", head: true })
-    .eq("usuario_id", opts.usuarioId)
-    .eq("canal", "whatsapp")
-    .gte("created_at", `${hoy}T00:00:00`);
+  const mensajesHoy = await dbSystem.notificacion.count({
+    where: { usuarioId: opts.usuarioId, canal: "whatsapp", createdAt: { gte: hoy } },
+  });
 
-  if ((mensajesHoy ?? 0) >= MAX_POR_DIA) {
+  if (mensajesHoy >= MAX_POR_DIA) {
     console.log(`[WhatsApp] Rate limit diario alcanzado para ${opts.usuarioId}`);
     return;
   }
 
   // Verificar cooldown por tipo (§9.3)
-  const desde = new Date(Date.now() - COOLDOWN_MS).toISOString();
-  const { count: reciente } = await supabase
-    .from("notificaciones")
-    .select("*", { count: "exact", head: true })
-    .eq("usuario_id", opts.usuarioId)
-    .eq("tipo", opts.tipo)
-    .eq("canal", "whatsapp")
-    .gte("created_at", desde);
+  const reciente = await dbSystem.notificacion.count({
+    where: {
+      usuarioId: opts.usuarioId,
+      tipo: opts.tipo,
+      canal: "whatsapp",
+      createdAt: { gte: new Date(Date.now() - COOLDOWN_MS) },
+    },
+  });
 
-  if ((reciente ?? 0) > 0) {
+  if (reciente > 0) {
     console.log(`[WhatsApp] Cooldown activo para ${opts.usuarioId}/${opts.tipo}`);
     return;
   }
 
   // Registrar intento (estado: pendiente)
-  const { data: notif } = await supabase
-    .from("notificaciones")
-    .insert({
-      usuario_id: opts.usuarioId,
-      tipo:       opts.tipo,
-      canal:      "whatsapp",
-      estado:     "pendiente",
-    })
-    .select("id")
-    .single();
+  const notif = await dbSystem.notificacion.create({
+    data: { usuarioId: opts.usuarioId, tipo: opts.tipo, canal: "whatsapp", estado: "pendiente" },
+    select: { id: true },
+  });
 
   try {
     const to = opts.telefono.startsWith("whatsapp:") ? opts.telefono : `whatsapp:${opts.telefono}`;
 
-    await client.messages.create({ from: FROM, to, body: opts.mensaje });
+    await getClient().messages.create({ from: FROM, to, body: opts.mensaje });
 
-    if (notif) {
-      await supabase.from("notificaciones").update({
-        estado:     "enviado",
-        enviado_at: new Date().toISOString(),
-      }).eq("id", notif.id);
-    }
+    await dbSystem.notificacion.update({
+      where: { id: notif.id },
+      data: { estado: "enviado", enviadoAt: new Date() },
+    });
   } catch (err) {
     console.error("[WhatsApp] Error Twilio:", err);
 
-    if (notif) {
-      await supabase.from("notificaciones").update({ estado: "error" }).eq("id", notif.id);
-    }
+    await dbSystem.notificacion.update({ where: { id: notif.id }, data: { estado: "error" } });
 
     // Si 3+ mensajes fallidos: alertar al admin (§9.3)
-    const { count: errores } = await supabase
-      .from("notificaciones")
-      .select("*", { count: "exact", head: true })
-      .eq("usuario_id", opts.usuarioId)
-      .eq("canal", "whatsapp")
-      .eq("estado", "error");
+    const errores = await dbSystem.notificacion.count({
+      where: { usuarioId: opts.usuarioId, canal: "whatsapp", estado: "error" },
+    });
 
-    if ((errores ?? 0) >= 3) {
+    if (errores >= 3) {
       console.error(`[WhatsApp] ${errores} fallos para usuario ${opts.usuarioId} — posible teléfono inválido`);
     }
   }

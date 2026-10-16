@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { requireRole, withAuth, ForbiddenError } from "@/lib/require-role";
+import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db, dbSystem } from "@/lib/db";
+import { legacy } from "@/lib/legacy";
 import { audit, AuditEvent } from "@/lib/audit";
 
 const crearUsuarioSchema = z.object({
@@ -17,28 +18,26 @@ const crearUsuarioSchema = z.object({
 export const GET = withAuth(async (_req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin");
 
-  const supabase = createServerSupabase();
-  const { data, error } = await supabase
-    .from("usuarios")
-    .select("id, nombre, email, rol, telefono, activo, mfa_habilitado, created_at")
-    .eq("cantina_id", session.user.cantinaId!)
-    .order("nombre");
+  const data = await db.usuario.findMany({
+    where: { cantinaId: session.user.cantinaId! },
+    select: {
+      id: true, nombre: true, email: true, rol: true, telefono: true, activo: true,
+      mfaHabilitado: true, createdAt: true,
+    },
+    orderBy: { nombre: "asc" },
+  });
 
-  if (error) throw error;
-  return NextResponse.json(data);
+  return NextResponse.json(legacy(data));
 });
 
 export const POST = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin");
 
   const body = await validateBody(req, crearUsuarioSchema);
-  const supabase = createServerSupabase();
 
-  const { data: existe } = await supabase
-    .from("usuarios")
-    .select("id")
-    .eq("email", body.email)
-    .single();
+  // El email es único en toda la plataforma, no solo en la cantina: se comprueba con el rol de
+  // sistema (RLS solo deja ver los usuarios de la propia cantina).
+  const existe = await dbSystem.usuario.findUnique({ where: { email: body.email }, select: { id: true } });
 
   if (existe) {
     return NextResponse.json({ error: "El email ya está registrado" }, { status: 409 });
@@ -46,21 +45,18 @@ export const POST = withAuth(async (req: NextRequest, session) => {
 
   const hashPwd = await bcrypt.hash(body.password, 12);
 
-  const { data, error } = await supabase
-    .from("usuarios")
-    .insert({
-      cantina_id: session.user.cantinaId,
-      nombre:     body.nombre,
-      email:      body.email,
-      hash_pwd:   hashPwd,
-      rol:        body.rol,
-      telefono:   body.telefono ?? null,
-      activo:     true,
-    })
-    .select("id, nombre, email, rol, activo")
-    .single();
-
-  if (error) throw error;
+  const data = await db.usuario.create({
+    data: {
+      cantinaId: session.user.cantinaId,
+      nombre:    body.nombre,
+      email:     body.email,
+      hashPwd,
+      rol:       body.rol,
+      telefono:  body.telefono ?? null,
+      activo:    true,
+    },
+    select: { id: true, nombre: true, email: true, rol: true, activo: true },
+  });
 
   await audit({
     usuarioId:  session.user.id,
@@ -71,5 +67,5 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     datos:      { email: body.email, rol: body.rol },
   });
 
-  return NextResponse.json(data, { status: 201 });
+  return NextResponse.json(legacy(data), { status: 201 });
 });

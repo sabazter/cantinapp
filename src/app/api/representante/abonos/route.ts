@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@/generated/prisma/client";
 import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { legacy } from "@/lib/legacy";
 import { audit, AuditEvent } from "@/lib/audit";
 import { encrypt } from "@/lib/crypto";
 import { tasaActivaBcv } from "@/lib/bcv";
+import { guardarArchivo, tipoImagen } from "@/lib/storage";
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 const abonoSchema = z.object({
   alumnoId:   z.string().min(1),
@@ -26,7 +28,8 @@ export const POST = withAuth(async (req: NextRequest, session) => {
   const representanteId = session.user.id;
   const contentType     = req.headers.get("content-type") ?? "";
 
-  let alumnoId: string, montoUsd: number, metodo: string, referencia: string | undefined, banco: string | undefined;
+  let alumnoId: string, montoUsd: number, metodo: z.infer<typeof abonoSchema>["metodo"];
+  let referencia: string | undefined, banco: string | undefined;
   let comprobanteFile: File | null = null;
 
   if (contentType.includes("multipart/form-data")) {
@@ -50,7 +53,8 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     metodo     = parsed.metodo;
     referencia = parsed.referencia;
     banco      = parsed.banco;
-    comprobanteFile = form.get("comprobante") as File | null;
+    const archivo = form.get("comprobante");
+    comprobanteFile = archivo instanceof File && archivo.size > 0 ? archivo : null;
   } else {
     const parsed = await validateBody(req, abonoSchema);
     alumnoId   = parsed.alumnoId;
@@ -60,72 +64,61 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     banco      = parsed.banco;
   }
 
-  const supabase = createServerSupabase();
-
   // Verificar que el alumno es hijo del representante (§3.4)
-  const { data: alumno } = await supabase
-    .from("alumnos")
-    .select("id, representante_id, cantina_id, cuentas_alumnos(id)")
-    .eq("id", alumnoId)
-    .is("deleted_at", null)
-    .single();
+  const alumno = await db.alumno.findFirst({
+    where: { id: alumnoId, representanteId, deletedAt: null },
+    select: { id: true, cantinaId: true, cuenta: { select: { id: true } } },
+  });
 
-  if (!alumno || alumno.representante_id !== representanteId) {
+  if (!alumno) {
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
   }
 
-  const cuentaAlumnoId = Array.isArray(alumno.cuentas_alumnos)
-    ? (alumno.cuentas_alumnos as { id: string }[])[0]?.id
-    : (alumno.cuentas_alumnos as { id: string } | null)?.id;
-
-  if (!cuentaAlumnoId) {
+  if (!alumno.cuenta) {
     return NextResponse.json({ error: "El alumno no tiene cuenta" }, { status: 400 });
   }
 
-  // Subir comprobante si existe
+  // Subir comprobante si existe (el tipo se valida por los bytes, no por el MIME declarado)
   let comprobanteUrl: string | null = null;
   if (comprobanteFile) {
-    if (!ALLOWED_TYPES.includes(comprobanteFile.type)) {
-      return NextResponse.json({ error: "Solo se permiten imágenes JPG, PNG o WebP" }, { status: 400 });
-    }
     if (comprobanteFile.size > MAX_SIZE) {
       return NextResponse.json({ error: "El comprobante supera los 5 MB" }, { status: 400 });
     }
+    const bytes = Buffer.from(await comprobanteFile.arrayBuffer());
+    const tipo = tipoImagen(bytes);
+    if (!tipo) {
+      return NextResponse.json({ error: "Solo se permiten imágenes JPG, PNG o WebP" }, { status: 400 });
+    }
 
-    const ext  = comprobanteFile.type.split("/")[1];
-    const path = `${alumno.cantina_id}/${alumnoId}_${Date.now()}.${ext}`;
-    const ab   = await comprobanteFile.arrayBuffer();
-
-    const { error: uploadErr } = await supabase.storage
-      .from("comprobantes-abonos")
-      .upload(path, ab, { contentType: comprobanteFile.type, upsert: false });
-
-    if (!uploadErr) comprobanteUrl = path;
+    const clave = `${alumno.cantinaId}/${alumnoId}_${Date.now()}.${tipo.ext}`;
+    try {
+      await guardarArchivo("comprobantes-abonos", clave, bytes);
+      comprobanteUrl = clave;
+    } catch (err) {
+      console.error("[abonos] comprobante:", err instanceof Error ? err.message : "error");
+    }
   }
 
-  const cantinaId = alumno.cantina_id;
+  const cantinaId = alumno.cantinaId;
   const tasaInfo  = await tasaActivaBcv(cantinaId);
 
   const referenciaEncriptada = referencia ? encrypt(referencia) : null;
-  const montoBs = tasaInfo ? montoUsd * tasaInfo.tasa : null;
+  const monto = new Prisma.Decimal(montoUsd);
 
-  const { data: abono, error: abonoErr } = await supabase
-    .from("abonos")
-    .insert({
-      cuenta_alumno_id:      cuentaAlumnoId,
-      monto_usd:             montoUsd,
-      monto_bs:              montoBs,
-      tasa_bcv:              tasaInfo?.tasa ?? null,
+  const abono = await db.abono.create({
+    data: {
+      cuentaAlumnoId:       alumno.cuenta.id,
+      montoUsd:             monto,
+      montoBs:              tasaInfo ? monto.times(tasaInfo.tasa) : null,
+      tasaBcv:              tasaInfo?.tasa ?? null,
       metodo,
-      referencia_encriptada: referenciaEncriptada,
-      banco:                 banco ?? null,
-      comprobante_url:       comprobanteUrl,
-      estado:                "pendiente",
-    })
-    .select("id")
-    .single();
-
-  if (abonoErr || !abono) throw abonoErr ?? new Error("Error insertando abono");
+      referenciaEncriptada,
+      banco:                banco ?? null,
+      comprobanteUrl,
+      estado:               "pendiente",
+    },
+    select: { id: true },
+  });
 
   await audit({
     usuarioId: representanteId,
@@ -149,33 +142,27 @@ export const GET = withAuth(async (req: NextRequest, session) => {
 
   if (!alumnoId) return NextResponse.json([], { status: 200 });
 
-  const supabase = createServerSupabase();
-
   // Verificar propiedad
-  const { data: alumno } = await supabase
-    .from("alumnos")
-    .select("representante_id, cuentas_alumnos(id)")
-    .eq("id", alumnoId)
-    .is("deleted_at", null)
-    .single();
+  const alumno = await db.alumno.findFirst({
+    where: { id: alumnoId, representanteId, deletedAt: null },
+    select: { cuenta: { select: { id: true } } },
+  });
 
-  if (!alumno || alumno.representante_id !== representanteId) {
+  if (!alumno) {
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
   }
 
-  const cuentaAlumnoId = Array.isArray(alumno.cuentas_alumnos)
-    ? (alumno.cuentas_alumnos as { id: string }[])[0]?.id
-    : (alumno.cuentas_alumnos as { id: string } | null)?.id;
+  if (!alumno.cuenta) return NextResponse.json([]);
 
-  if (!cuentaAlumnoId) return NextResponse.json([]);
+  const data = await db.abono.findMany({
+    where: { cuentaAlumnoId: alumno.cuenta.id, deletedAt: null },
+    select: {
+      id: true, montoUsd: true, montoBs: true, metodo: true, banco: true, estado: true,
+      createdAt: true, confirmadoAt: true, motivoRechazo: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
 
-  const { data } = await supabase
-    .from("abonos")
-    .select("id, monto_usd, monto_bs, metodo, banco, estado, created_at, confirmado_at, motivo_rechazo")
-    .eq("cuenta_alumno_id", cuentaAlumnoId)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(50);
-
-  return NextResponse.json(data ?? []);
+  return NextResponse.json(legacy(data));
 });

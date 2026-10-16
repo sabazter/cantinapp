@@ -5,7 +5,8 @@ import { SignJWT, jwtVerify, importPKCS8, importSPKI } from "jose";
 import * as OTPAuth from "otpauth";
 import bcrypt from "bcryptjs";
 import { Rol } from "@/generated/prisma/enums";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { dbSystem } from "@/lib/db";
+import { clientIpFromRecord } from "@/lib/ip";
 import { verificarBloqueo, registrarIntento } from "@/lib/brute-force";
 import { audit, AuditEvent } from "@/lib/audit";
 
@@ -77,9 +78,9 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        const ip =
-          (req?.headers?.["x-forwarded-for"] as string)?.split(",")[0].trim() ??
-          "unknown";
+        const ip = clientIpFromRecord(
+          req?.headers as Record<string, string | string[] | undefined> | undefined
+        );
 
         try {
           // Verificar bloqueo por fuerza bruta
@@ -97,30 +98,20 @@ export const authOptions: NextAuthOptions = {
           // Continuar si el error es de BD (no bloquear al usuario por fallo de tabla)
         }
 
-        let usuario = null;
+        let usuario: {
+          id: string; cantinaId: string | null; nombre: string; email: string;
+          hashPwd: string; rol: Rol; activo: boolean; mfaHabilitado: boolean; mfaSecret: string | null;
+        } | null = null;
         try {
-          const supabase = createServerSupabase();
-          const { data, error } = await supabase
-            .from("usuarios")
-            .select("id, cantina_id, nombre, email, hash_pwd, rol, activo, mfa_habilitado, mfa_secret")
-            .eq("email", credentials.email)
-            .single();
-          if (error) throw error;
-          if (data) {
-            usuario = {
-              id:            data.id as string,
-              cantinaId:     data.cantina_id as string | null,
-              nombre:        data.nombre as string,
-              email:         data.email as string,
-              hashPwd:       data.hash_pwd as string,
-              rol:           data.rol as Rol,
-              activo:        data.activo as boolean,
-              mfaHabilitado: data.mfa_habilitado as boolean,
-              mfaSecret:     data.mfa_secret as string | null,
-            };
-          }
+          usuario = await dbSystem.usuario.findUnique({
+            where: { email: credentials.email },
+            select: {
+              id: true, cantinaId: true, nombre: true, email: true, hashPwd: true,
+              rol: true, activo: true, mfaHabilitado: true, mfaSecret: true,
+            },
+          });
         } catch (err) {
-          console.error("[auth] findUnique error:", err);
+          console.error("[auth] findUnique error:", err instanceof Error ? err.message : err);
           return null;
         }
 

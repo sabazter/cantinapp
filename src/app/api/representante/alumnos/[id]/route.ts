@@ -1,56 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole, withAuth } from "@/lib/require-role";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { legacy } from "@/lib/legacy";
 import { audit, AuditEvent } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-// Verifica que el alumno pertenece al representante autenticado (§3.4)
-async function verificarHijo(representanteId: string, alumnoId: string) {
-  const supabase = createServerSupabase();
-  const { data } = await supabase
-    .from("alumnos")
-    .select("id, representante_id")
-    .eq("id", alumnoId)
-    .is("deleted_at", null)
-    .single();
-
-  if (!data || data.representante_id !== representanteId) return null;
-  return data;
-}
-
 // GET /api/representante/alumnos/[id] — detalle + historial de compras
+// Verifica que el alumno pertenece al representante autenticado (§3.4)
 export const GET = withAuth(async (req: NextRequest, session, { params }: Ctx) => {
   requireRole(session, "representante");
   const { id } = await params;
 
-  const hijo = await verificarHijo(session.user.id, id);
-  if (!hijo) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+  const alumno = await db.alumno.findFirst({
+    where: { id, representanteId: session.user.id, deletedAt: null },
+    select: {
+      id: true, nombre: true, curso: true, seccion: true, activo: true,
+      cuenta: { select: { saldo: true } },
+    },
+  });
+  if (!alumno) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
-  const supabase = createServerSupabase();
   const { searchParams } = new URL(req.url);
-  const pagina = parseInt(searchParams.get("pagina") ?? "1");
+  const pagina = Math.max(1, parseInt(searchParams.get("pagina") ?? "1") || 1);
   const porPagina = 20;
-  const offset = (pagina - 1) * porPagina;
 
-  const [alumnoRes, ventasRes] = await Promise.all([
-    supabase
-      .from("alumnos")
-      .select("id, nombre, curso, seccion, activo, cuentas_alumnos(saldo)")
-      .eq("id", id)
-      .single(),
-
-    supabase
-      .from("ventas")
-      .select(`
-        id, total_usd, total_bs, tasa_bcv, metodo_pago, es_fiado, created_at,
-        detalle_ventas ( cantidad, precio_usd_unitario, productos ( nombre ) )
-      `)
-      .eq("alumno_id", id)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .range(offset, offset + porPagina - 1),
-  ]);
+  const ventas = await db.venta.findMany({
+    where: { alumnoId: id, deletedAt: null },
+    select: {
+      id: true, totalUsd: true, totalBs: true, tasaBcv: true, metodoPago: true, esFiado: true, createdAt: true,
+      detalles: {
+        select: {
+          cantidad: true, precioUsdUnitario: true,
+          producto: { select: { nombre: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    skip: (pagina - 1) * porPagina,
+    take: porPagina,
+  });
 
   await audit({
     usuarioId: session.user.id,
@@ -62,8 +51,8 @@ export const GET = withAuth(async (req: NextRequest, session, { params }: Ctx) =
   });
 
   return NextResponse.json({
-    alumno: alumnoRes.data,
-    ventas: ventasRes.data ?? [],
+    alumno: legacy(alumno),
+    ventas: legacy(ventas),
     pagina,
     porPagina,
   });

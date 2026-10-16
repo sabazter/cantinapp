@@ -4,8 +4,8 @@ import QRCode from "qrcode";
 import { z } from "zod";
 import { withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
-import { audit, AuditEvent } from "@/lib/audit";
+import { db } from "@/lib/db";
+import { audit } from "@/lib/audit";
 
 const ISSUER = "CantinApp";
 
@@ -24,11 +24,10 @@ export const GET = withAuth(async (_req: NextRequest, session) => {
   const qr     = await QRCode.toDataURL(uri);
 
   // Guardar secreto temporal (sin activar MFA todavía)
-  const supabase = createServerSupabase();
-  await supabase
-    .from("usuarios")
-    .update({ mfa_secret: secret })
-    .eq("id", session.user.id);
+  await db.usuario.update({
+    where: { id: session.user.id },
+    data: { mfaSecret: secret },
+  });
 
   return NextResponse.json({ secret, qr });
 });
@@ -39,14 +38,12 @@ const verifySchema = z.object({ code: z.string().length(6) });
 export const POST = withAuth(async (req: NextRequest, session) => {
   const { code } = await validateBody(req, verifySchema);
 
-  const supabase = createServerSupabase();
-  const { data: usuario } = await supabase
-    .from("usuarios")
-    .select("mfa_secret")
-    .eq("id", session.user.id)
-    .single();
+  const usuario = await db.usuario.findUnique({
+    where: { id: session.user.id },
+    select: { mfaSecret: true },
+  });
 
-  if (!usuario?.mfa_secret) {
+  if (!usuario?.mfaSecret) {
     return NextResponse.json({ error: "Primero genera el código QR" }, { status: 400 });
   }
 
@@ -56,7 +53,7 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     algorithm: "SHA1",
     digits:    6,
     period:    30,
-    secret:    OTPAuth.Secret.fromBase32(usuario.mfa_secret),
+    secret:    OTPAuth.Secret.fromBase32(usuario.mfaSecret),
   });
 
   const delta = totp.validate({ token: code, window: 1 });
@@ -64,10 +61,10 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     return NextResponse.json({ error: "Código inválido" }, { status: 400 });
   }
 
-  await supabase
-    .from("usuarios")
-    .update({ mfa_habilitado: true })
-    .eq("id", session.user.id);
+  await db.usuario.update({
+    where: { id: session.user.id },
+    data: { mfaHabilitado: true },
+  });
 
   await audit({
     usuarioId: session.user.id,
@@ -82,14 +79,12 @@ export const POST = withAuth(async (req: NextRequest, session) => {
 export const DELETE = withAuth(async (req: NextRequest, session) => {
   const { code } = await validateBody(req, verifySchema);
 
-  const supabase = createServerSupabase();
-  const { data: usuario } = await supabase
-    .from("usuarios")
-    .select("mfa_secret")
-    .eq("id", session.user.id)
-    .single();
+  const usuario = await db.usuario.findUnique({
+    where: { id: session.user.id },
+    select: { mfaSecret: true },
+  });
 
-  if (!usuario?.mfa_secret) {
+  if (!usuario?.mfaSecret) {
     return NextResponse.json({ error: "MFA no está configurado" }, { status: 400 });
   }
 
@@ -99,17 +94,17 @@ export const DELETE = withAuth(async (req: NextRequest, session) => {
     algorithm: "SHA1",
     digits:    6,
     period:    30,
-    secret:    OTPAuth.Secret.fromBase32(usuario.mfa_secret),
+    secret:    OTPAuth.Secret.fromBase32(usuario.mfaSecret),
   });
 
   if (totp.validate({ token: code, window: 1 }) === null) {
     return NextResponse.json({ error: "Código inválido" }, { status: 400 });
   }
 
-  await supabase
-    .from("usuarios")
-    .update({ mfa_habilitado: false, mfa_secret: null })
-    .eq("id", session.user.id);
+  await db.usuario.update({
+    where: { id: session.user.id },
+    data: { mfaHabilitado: false, mfaSecret: null },
+  });
 
   await audit({
     usuarioId: session.user.id,

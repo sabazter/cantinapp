@@ -1,25 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SignJWT, jwtVerify } from "jose";
-import { z } from "zod";
 import { withAuth } from "@/lib/require-role";
-import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db, dbSystem } from "@/lib/db";
 import { sendEmail } from "@/lib/email/resend";
 import { emailVerificacion } from "@/lib/email/templates";
+import { aplicarLimites } from "@/lib/rate-limit";
 
-const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET!);
+const secret = () => new TextEncoder().encode(process.env.NEXTAUTH_SECRET!);
 
 // POST /api/auth/verificar-email — genera y envía email de verificación
 export const POST = withAuth(async (_req: NextRequest, session) => {
-  const supabase = createServerSupabase();
+  const usuario = await db.usuario.findUnique({
+    where: { id: session.user.id },
+    select: { emailVerificado: true },
+  });
 
-  const { data: usuario } = await supabase
-    .from("usuarios")
-    .select("email_verificado, email")
-    .eq("id", session.user.id)
-    .single();
-
-  if (usuario?.email_verificado) {
+  if (usuario?.emailVerificado) {
     return NextResponse.json({ error: "El email ya está verificado" }, { status: 400 });
   }
 
@@ -27,7 +23,7 @@ export const POST = withAuth(async (_req: NextRequest, session) => {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("24h")
-    .sign(secret);
+    .sign(secret());
 
   const tmpl = emailVerificacion(token);
   await sendEmail({ to: session.user.email, ...tmpl });
@@ -36,27 +32,25 @@ export const POST = withAuth(async (_req: NextRequest, session) => {
 });
 
 // GET /api/auth/verificar-email?token=xxx — confirma el token
-const tokenSchema = z.object({ token: z.string().min(1) });
-
 export async function GET(req: NextRequest) {
+  const limitado = await aplicarLimites(req, "global");
+  if (limitado) return limitado;
+
   const token = req.nextUrl.searchParams.get("token");
   if (!token) {
     return NextResponse.json({ error: "Token requerido" }, { status: 400 });
   }
 
   try {
-    const { payload } = await jwtVerify(token, secret);
+    const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
     if (payload.type !== "email_verify" || !payload.sub) {
       return NextResponse.json({ error: "Token inválido" }, { status: 400 });
     }
 
-    const supabase = createServerSupabase();
-    const { error } = await supabase
-      .from("usuarios")
-      .update({ email_verificado: true, updated_at: new Date().toISOString() })
-      .eq("id", payload.sub as string);
-
-    if (error) return NextResponse.json({ error: "Error al verificar" }, { status: 500 });
+    await dbSystem.usuario.update({
+      where: { id: payload.sub },
+      data: { emailVerificado: true },
+    });
 
     return NextResponse.json({ ok: true });
   } catch {

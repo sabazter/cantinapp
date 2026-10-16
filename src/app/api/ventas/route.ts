@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@/generated/prisma/client";
 import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { legacy, rangoDia } from "@/lib/legacy";
 import { audit, AuditEvent } from "@/lib/audit";
 import { tasaActivaBcv } from "@/lib/bcv";
 import { notificarFiadoRegistrado } from "@/lib/notifications";
 
 const itemSchema = z.object({
   productoId: z.string().min(1),
-  cantidad:   z.number().int().min(1),
+  cantidad:   z.number().int().min(1).max(1000),
 });
 
 const ventaSchema = z.object({
@@ -19,6 +21,8 @@ const ventaSchema = z.object({
   items:      z.array(itemSchema).min(1, "El carrito está vacío"),
 });
 
+// Toda la venta corre en la transacción del request (withAuth): si cualquier paso falla o se
+// responde con status >= 400, no queda stock descontado, deuda registrada ni venta a medias.
 export const POST = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "vendedor", "admin", "superadmin");
 
@@ -26,139 +30,123 @@ export const POST = withAuth(async (req: NextRequest, session) => {
   const vendedorId = session.user.id;
   const body       = await validateBody(req, ventaSchema);
 
-  const supabase = createServerSupabase();
-
   // Obtener tasa BCV activa
   const tasaInfo = await tasaActivaBcv(cantinaId);
   if (!tasaInfo) {
     return NextResponse.json({ error: "Sin tasa BCV disponible para hoy" }, { status: 400 });
   }
-  const tasaBcv = tasaInfo.tasa;
+  const tasaBcv = new Prisma.Decimal(tasaInfo.tasa);
 
   // Cargar todos los productos del carrito
-  const productoIds = body.items.map(i => i.productoId);
-  const { data: productos, error: prodErr } = await supabase
-    .from("productos")
-    .select("id, nombre, precio_usd, precio_jornada_usd, stock, activo, cantina_id")
-    .in("id", productoIds);
+  const productoIds = [...new Set(body.items.map(i => i.productoId))];
+  const productos = await db.producto.findMany({
+    where: { id: { in: productoIds }, cantinaId },
+    select: { id: true, nombre: true, precioUsd: true, precioJornadaUsd: true, activo: true },
+  });
 
-  if (prodErr || !productos) throw prodErr ?? new Error("Error cargando productos");
-
-  // Validaciones de productos
+  const porId = new Map(productos.map(p => [p.id, p]));
   for (const item of body.items) {
-    const prod = productos.find(p => p.id === item.productoId);
-    if (!prod || !prod.activo || prod.cantina_id !== cantinaId) {
+    const prod = porId.get(item.productoId);
+    if (!prod || !prod.activo) {
       return NextResponse.json({ error: `Producto no disponible` }, { status: 400 });
-    }
-    if (prod.stock < item.cantidad) {
-      return NextResponse.json({ error: `Stock insuficiente para "${prod.nombre}"` }, { status: 400 });
     }
   }
 
-  // Calcular totales
-  const precioEfectivo = (prod: { precio_usd: string; precio_jornada_usd?: string | null }) =>
-    prod.precio_jornada_usd ? Number(prod.precio_jornada_usd) : Number(prod.precio_usd);
+  // Calcular totales con aritmética decimal (precios y tasa nunca pasan por float)
+  const precioEfectivo = (id: string) => {
+    const p = porId.get(id)!;
+    return p.precioJornadaUsd ?? p.precioUsd;
+  };
+  const totalUsd = body.items.reduce(
+    (sum, item) => sum.plus(precioEfectivo(item.productoId).times(item.cantidad)),
+    new Prisma.Decimal(0)
+  );
+  const totalBs = totalUsd.times(tasaBcv);
 
-  const totalUsd = body.items.reduce((sum, item) => {
-    const prod = productos.find(p => p.id === item.productoId)!;
-    return sum + precioEfectivo(prod) * item.cantidad;
-  }, 0);
-  const totalBs = totalUsd * tasaBcv;
+  // El alumno, si viene, debe pertenecer a esta cantina (también para pagos que no son fiado)
+  if (body.alumnoId) {
+    const alumno = await db.alumno.findFirst({
+      where: { id: body.alumnoId, cantinaId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!alumno) {
+      return NextResponse.json({ error: "Alumno no encontrado" }, { status: 400 });
+    }
+  }
 
   // Validar fiado
   if (body.metodoPago === "fiado") {
     if (!body.alumnoId) {
       return NextResponse.json({ error: "Fiado requiere identificar al alumno" }, { status: 400 });
     }
-    const { data: alumno } = await supabase
-      .from("alumnos")
-      .select("fiado_habilitado, limite_fiado_usd, cuentas_alumnos(saldo)")
-      .eq("id", body.alumnoId)
-      .eq("cantina_id", cantinaId)
-      .is("deleted_at", null)
-      .single();
+    const alumno = await db.alumno.findFirst({
+      where: { id: body.alumnoId, cantinaId, deletedAt: null },
+      select: { fiadoHabilitado: true, limiteFiadoUsd: true },
+    });
 
     if (!alumno) {
       return NextResponse.json({ error: "Alumno no encontrado" }, { status: 400 });
     }
 
-    if (!alumno.fiado_habilitado) {
+    if (!alumno.fiadoHabilitado) {
       return NextResponse.json({ error: "Este alumno no tiene el fiado habilitado" }, { status: 403 });
     }
 
-    const cuenta = Array.isArray(alumno.cuentas_alumnos)
-      ? (alumno.cuentas_alumnos as { saldo: string }[])[0]
-      : (alumno.cuentas_alumnos as { saldo: string } | null);
-    const saldoActual = Number(cuenta?.saldo ?? 0);
-    const deudaActual = saldoActual < 0 ? Math.abs(saldoActual) : 0;
-    const limiteUsd   = alumno.limite_fiado_usd
-      ? Number(alumno.limite_fiado_usd)
-      : null;
+    // Bloquea la cuenta hasta el commit: dos fiados simultáneos no pueden saltarse el límite
+    const filas = await db.$queryRaw<{ saldo: Prisma.Decimal }[]>`
+      SELECT saldo FROM cuentas_alumnos WHERE alumno_id = ${body.alumnoId} FOR UPDATE`;
+    const saldoActual = filas[0]?.saldo ?? new Prisma.Decimal(0);
+    const deudaActual = saldoActual.lt(0) ? saldoActual.abs() : new Prisma.Decimal(0);
 
-    if (limiteUsd !== null && deudaActual + totalUsd > limiteUsd) {
+    if (alumno.limiteFiadoUsd && deudaActual.plus(totalUsd).gt(alumno.limiteFiadoUsd)) {
       return NextResponse.json({
-        error: `Límite de fiado excedido. Deuda actual: $${deudaActual.toFixed(2)}, límite: $${limiteUsd.toFixed(2)}`,
+        error: `Límite de fiado excedido. Deuda actual: $${deudaActual.toFixed(2)}, límite: $${alumno.limiteFiadoUsd.toFixed(2)}`,
       }, { status: 400 });
     }
   }
 
-  // Insertar venta
-  const { data: venta, error: ventaErr } = await supabase
-    .from("ventas")
-    .insert({
-      cantina_id:  cantinaId,
-      vendedor_id: vendedorId,
-      alumno_id:   body.alumnoId ?? null,
-      tasa_bcv:    tasaBcv,
-      total_usd:   totalUsd,
-      total_bs:    totalBs,
-      metodo_pago: body.metodoPago,
-      es_fiado:    body.metodoPago === "fiado",
-      referencia:  body.referencia ?? null,
-    })
-    .select("id")
-    .single();
+  // Descontar stock de forma atómica y condicional: UPDATE ... WHERE stock >= cantidad
+  for (const item of body.items) {
+    const res = await db.producto.updateMany({
+      where: { id: item.productoId, cantinaId, activo: true, stock: { gte: item.cantidad } },
+      data: { stock: { decrement: item.cantidad } },
+    });
+    if (res.count !== 1) {
+      const nombre = porId.get(item.productoId)!.nombre;
+      return NextResponse.json({ error: `Stock insuficiente para "${nombre}"` }, { status: 400 });
+    }
+  }
 
-  if (ventaErr || !venta) throw ventaErr ?? new Error("Error insertando venta");
-
-  const detalles = body.items.map(item => {
-    const prod = productos.find(p => p.id === item.productoId)!;
-    return {
-      venta_id:             venta.id,
-      producto_id:          item.productoId,
-      cantidad:             item.cantidad,
-      precio_usd_unitario:  precioEfectivo(prod),
-    };
+  // Registrar la venta con su detalle
+  const venta = await db.venta.create({
+    data: {
+      cantinaId,
+      vendedorId,
+      alumnoId:   body.alumnoId ?? null,
+      tasaBcv,
+      totalUsd,
+      totalBs,
+      metodoPago: body.metodoPago,
+      esFiado:    body.metodoPago === "fiado",
+      referencia: body.referencia ?? null,
+      detalles: {
+        create: body.items.map(item => ({
+          productoId:        item.productoId,
+          cantidad:          item.cantidad,
+          precioUsdUnitario: precioEfectivo(item.productoId),
+        })),
+      },
+    },
+    select: { id: true },
   });
 
-  // Insertar detalles + descontar stock + actualizar saldo si fiado
-  // Insertar detalles y descontar stock en paralelo
-  await Promise.all([
-    supabase.from("detalle_ventas").insert(detalles).then(() => {}),
-    ...body.items.map(item => {
-      const prod = productos.find(p => p.id === item.productoId)!;
-      return supabase
-        .from("productos")
-        .update({ stock: prod.stock - item.cantidad })
-        .eq("id", item.productoId)
-        .then(() => {});
-    }),
-  ]);
-
-  // Actualizar saldo si es fiado
+  // Registrar la deuda si es fiado (la fila ya está bloqueada)
   if (body.metodoPago === "fiado" && body.alumnoId) {
-    const { data: cuenta } = await supabase
-      .from("cuentas_alumnos")
-      .select("id, saldo")
-      .eq("alumno_id", body.alumnoId)
-      .single();
-
-    if (cuenta) {
-      await supabase
-        .from("cuentas_alumnos")
-        .update({ saldo: Number(cuenta.saldo) - totalUsd })
-        .eq("id", cuenta.id);
-    }
+    const res = await db.cuentaAlumno.updateMany({
+      where: { alumnoId: body.alumnoId },
+      data: { saldo: { decrement: totalUsd } },
+    });
+    if (res.count !== 1) throw new Error("El alumno no tiene cuenta corriente");
   }
 
   await audit({
@@ -169,20 +157,23 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     entidadId: venta.id,
     datos: {
       alumnoId:   body.alumnoId ?? null,
-      totalUsd,
-      tasaBcv,
+      totalUsd:   totalUsd.toNumber(),
+      tasaBcv:    tasaBcv.toNumber(),
       metodoPago: body.metodoPago,
       items:      body.items.length,
     },
   });
 
-  // Notificar fiado al representante (fire-and-forget)
+  // Notificar fiado al representante (fire-and-forget; usa conexión de sistema, no esta transacción)
   if (body.metodoPago === "fiado" && body.alumnoId) {
-    const { data: al } = await supabase.from("alumnos").select("nombre").eq("id", body.alumnoId).single();
+    const al = await db.alumno.findUnique({ where: { id: body.alumnoId }, select: { nombre: true } });
     if (al) notificarFiadoRegistrado(body.alumnoId, al.nombre).catch(() => {});
   }
 
-  return NextResponse.json({ id: venta.id, totalUsd, totalBs, tasaBcv }, { status: 201 });
+  return NextResponse.json(
+    { id: venta.id, totalUsd: totalUsd.toNumber(), totalBs: totalBs.toNumber(), tasaBcv: tasaBcv.toNumber() },
+    { status: 201 }
+  );
 });
 
 // GET /api/ventas — lista de ventas del día (vendedor/admin)
@@ -190,24 +181,22 @@ export const GET = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "vendedor", "admin", "superadmin");
 
   const cantinaId = session.user.cantinaId!;
-  const supabase  = createServerSupabase();
   const { searchParams } = new URL(req.url);
 
   const fecha = searchParams.get("fecha") ?? new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    return NextResponse.json({ error: "Fecha inválida" }, { status: 400 });
+  }
 
-  const { data, error } = await supabase
-    .from("ventas")
-    .select(`
-      id, total_usd, total_bs, metodo_pago, es_fiado, created_at,
-      alumnos ( nombre ),
-      usuarios!ventas_vendedor_id_fkey ( nombre )
-    `)
-    .eq("cantina_id", cantinaId)
-    .is("deleted_at", null)
-    .gte("created_at", `${fecha}T00:00:00`)
-    .lte("created_at", `${fecha}T23:59:59`)
-    .order("created_at", { ascending: false });
+  const data = await db.venta.findMany({
+    where: { cantinaId, deletedAt: null, createdAt: rangoDia(fecha) },
+    select: {
+      id: true, totalUsd: true, totalBs: true, metodoPago: true, esFiado: true, createdAt: true,
+      alumno:   { select: { nombre: true } },
+      vendedor: { select: { nombre: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
 
-  if (error) throw error;
-  return NextResponse.json(data ?? []);
+  return NextResponse.json(legacy(data));
 });

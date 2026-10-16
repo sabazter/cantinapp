@@ -1,5 +1,7 @@
-import { createServerSupabase } from "@/lib/supabase-server";
+import { dbSystem } from "@/lib/db";
 import { headers } from "next/headers";
+import { clientIp } from "@/lib/ip";
+import type { Prisma } from "@/generated/prisma/client";
 
 interface AuditParams {
   usuarioId?: string;
@@ -11,31 +13,27 @@ interface AuditParams {
 }
 
 /**
- * Registra un evento en la tabla audit_logs.
+ * Registra un evento en la tabla audit_logs (conexión de sistema, independiente de la
+ * transacción del request: el rastro se conserva aunque el request se revierta).
  * Nunca debe lanzar — los errores de auditoría no deben interrumpir el flujo de negocio.
  */
 export async function audit(params: AuditParams): Promise<void> {
   try {
-    const headersList = await headers();
-    const ip =
-      headersList.get("x-forwarded-for")?.split(",")[0].trim() ??
-      headersList.get("x-real-ip") ??
-      "unknown";
-    const userAgent = headersList.get("user-agent") ?? undefined;
-
-    const supabase = createServerSupabase();
-    await supabase.from("audit_logs").insert({
-      usuario_id: params.usuarioId ?? null,
-      cantina_id: params.cantinaId ?? null,
-      evento: params.evento,
-      entidad: params.entidad ?? null,
-      entidad_id: params.entidadId ?? null,
-      datos: params.datos ?? null,
-      ip,
-      user_agent: userAgent ?? null,
+    const h = await headers();
+    await dbSystem.auditLog.create({
+      data: {
+        usuarioId: params.usuarioId ?? null,
+        cantinaId: params.cantinaId ?? null,
+        evento: params.evento,
+        entidad: params.entidad ?? null,
+        entidadId: params.entidadId ?? null,
+        datos: (params.datos ?? undefined) as Prisma.InputJsonValue | undefined,
+        ip: clientIp((n) => h.get(n)),
+        userAgent: h.get("user-agent") ?? null,
+      },
     });
   } catch (err) {
-    console.error("[audit] Error al registrar evento:", err);
+    console.error("[audit] Error al registrar evento:", err instanceof Error ? err.message : err);
   }
 }
 

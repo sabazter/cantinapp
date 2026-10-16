@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import https from "https";
-import { createServerSupabase } from "./supabase-server";
+import { dbSystem } from "./db";
+import { fechaISO } from "./legacy";
 import { AuditEvent } from "./audit";
 
 export interface TasaBcv {
@@ -74,46 +75,39 @@ export async function actualizarTasaBcv(cantinaId: string): Promise<number> {
     return ultima;
   }
 
-  const supabase = createServerSupabase();
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = new Date(new Date().toISOString().slice(0, 10));
 
-  // Upsert: si ya existe la tasa del día no la sobreescribe si es manual
-  await supabase.from("tasas_bcv").upsert(
-    { cantina_id: cantinaId, fecha: hoy, tasa_usd_bs: tasa, fuente: "automatica" },
-    { onConflict: "cantina_id,fecha", ignoreDuplicates: false }
-  );
+  await dbSystem.tasaBcv.upsert({
+    where: { cantinaId_fecha: { cantinaId, fecha: hoy } },
+    create: { cantinaId, fecha: hoy, tasaUsdBs: tasa, fuente: "automatica" },
+    update: { tasaUsdBs: tasa, fuente: "automatica" },
+  });
 
   return tasa;
 }
 
 export async function ultimaTasaBcv(cantinaId: string): Promise<number | null> {
-  const supabase = createServerSupabase();
-  const { data } = await supabase
-    .from("tasas_bcv")
-    .select("tasa_usd_bs")
-    .eq("cantina_id", cantinaId)
-    .order("fecha", { ascending: false })
-    .limit(1)
-    .single();
+  const data = await dbSystem.tasaBcv.findFirst({
+    where: { cantinaId },
+    orderBy: { fecha: "desc" },
+    select: { tasaUsdBs: true },
+  });
 
-  return data ? Number(data.tasa_usd_bs) : null;
+  return data ? data.tasaUsdBs.toNumber() : null;
 }
 
 export async function tasaActivaBcv(cantinaId: string): Promise<TasaBcv | null> {
-  const supabase = createServerSupabase();
-  const { data } = await supabase
-    .from("tasas_bcv")
-    .select("tasa_usd_bs, fecha, fuente")
-    .eq("cantina_id", cantinaId)
-    .order("fecha", { ascending: false })
-    .limit(1)
-    .single();
+  const data = await dbSystem.tasaBcv.findFirst({
+    where: { cantinaId },
+    orderBy: { fecha: "desc" },
+    select: { tasaUsdBs: true, fecha: true, fuente: true },
+  });
 
   if (!data) return null;
   return {
-    tasa: Number(data.tasa_usd_bs),
-    fecha: data.fecha,
-    fuente: data.fuente as "automatica" | "manual",
+    tasa: data.tasaUsdBs.toNumber(),
+    fecha: fechaISO(data.fecha),
+    fuente: data.fuente,
   };
 }
 
@@ -122,14 +116,14 @@ async function notificarFalloBcv(cantinaId: string, fallos: number): Promise<voi
 
   // Insertar directamente en audit_logs sin usar headers() ya que estamos en contexto cron
   try {
-    const supabase = createServerSupabase();
-    await supabase.from("audit_logs").insert({
-      usuario_id: null,
-      cantina_id: cantinaId,
-      evento:     AuditEvent.TASA_BCV_CAMBIADA,
-      entidad:    "tasas_bcv",
-      datos:      { error: `${fallos} fallos consecutivos de scraping`, accion: "fallback_ultima_tasa" },
-      ip:         "cron",
+    await dbSystem.auditLog.create({
+      data: {
+        cantinaId,
+        evento: AuditEvent.TASA_BCV_CAMBIADA,
+        entidad: "tasas_bcv",
+        datos:  { error: `${fallos} fallos consecutivos de scraping`, accion: "fallback_ultima_tasa" },
+        ip:     "cron",
+      },
     });
   } catch {}
 }

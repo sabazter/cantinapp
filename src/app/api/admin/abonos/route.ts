@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@/generated/prisma/client";
 import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { legacy } from "@/lib/legacy";
 import { audit, AuditEvent } from "@/lib/audit";
 import { encrypt } from "@/lib/crypto";
 import { tasaActivaBcv } from "@/lib/bcv";
@@ -21,48 +23,37 @@ export const POST = withAuth(async (req: NextRequest, session) => {
 
   const cantinaId = session.user.cantinaId!;
   const body      = await validateBody(req, abonoSchema);
-  const supabase  = createServerSupabase();
 
   // Verificar alumno + cuenta
-  const { data: alumno } = await supabase
-    .from("alumnos")
-    .select("id, cantina_id, cuentas_alumnos(id)")
-    .eq("id", body.alumnoId)
-    .eq("cantina_id", cantinaId)
-    .is("deleted_at", null)
-    .single();
+  const alumno = await db.alumno.findFirst({
+    where: { id: body.alumnoId, cantinaId, deletedAt: null },
+    select: { id: true, cuenta: { select: { id: true } } },
+  });
 
   if (!alumno) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
-  const cuentaAlumnoId = Array.isArray(alumno.cuentas_alumnos)
-    ? (alumno.cuentas_alumnos as { id: string }[])[0]?.id
-    : (alumno.cuentas_alumnos as { id: string } | null)?.id;
-
-  if (!cuentaAlumnoId) {
+  if (!alumno.cuenta) {
     return NextResponse.json({ error: "El alumno no tiene cuenta" }, { status: 400 });
   }
 
   const tasaInfo = await tasaActivaBcv(cantinaId);
 
   const referenciaEncriptada = body.referencia ? encrypt(body.referencia) : null;
-  const montoBs = tasaInfo ? body.montoUsd * tasaInfo.tasa : null;
+  const monto = new Prisma.Decimal(body.montoUsd);
 
-  const { data: abono, error: abonoErr } = await supabase
-    .from("abonos")
-    .insert({
-      cuenta_alumno_id:     cuentaAlumnoId,
-      monto_usd:            body.montoUsd,
-      monto_bs:             montoBs,
-      tasa_bcv:             tasaInfo?.tasa ?? null,
+  const abono = await db.abono.create({
+    data: {
+      cuentaAlumnoId:       alumno.cuenta.id,
+      montoUsd:             monto,
+      montoBs:              tasaInfo ? monto.times(tasaInfo.tasa) : null,
+      tasaBcv:              tasaInfo?.tasa ?? null,
       metodo:               body.metodo,
-      referencia_encriptada: referenciaEncriptada,
+      referenciaEncriptada,
       banco:                body.banco ?? null,
       estado:               "pendiente",
-    })
-    .select("id")
-    .single();
-
-  if (abonoErr || !abono) throw abonoErr ?? new Error("Error insertando abono");
+    },
+    select: { id: true },
+  });
 
   await audit({
     usuarioId: session.user.id,
@@ -76,37 +67,34 @@ export const POST = withAuth(async (req: NextRequest, session) => {
   return NextResponse.json({ id: abono.id }, { status: 201 });
 });
 
+const ESTADOS = ["pendiente", "confirmado", "rechazado"] as const;
+
 // GET /api/admin/abonos — lista de abonos pendientes
 export const GET = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin");
 
   const cantinaId = session.user.cantinaId!;
-  const supabase  = createServerSupabase();
   const { searchParams } = new URL(req.url);
-  const estado = searchParams.get("estado") ?? "pendiente";
+  const estadoParam = searchParams.get("estado") ?? "pendiente";
+  const estado = ESTADOS.find(e => e === estadoParam);
+  if (!estado) return NextResponse.json({ error: "Estado inválido" }, { status: 400 });
 
-  const { data, error } = await supabase
-    .from("abonos")
-    .select(`
-      id, monto_usd, monto_bs, metodo, banco, estado,
-      created_at, confirmado_at,
-      cuentas_alumnos (
-        alumno_id,
-        alumnos ( id, nombre, curso, cantina_id )
-      )
-    `)
-    .eq("estado", estado)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(100);
-
-  if (error) throw error;
-
-  // Filtrar por cantina a través del alumno
-  const filtrado = (data ?? []).filter(a => {
-    const ca = (a.cuentas_alumnos as unknown as { alumnos: { cantina_id: string } | null } | null);
-    return ca?.alumnos?.cantina_id === cantinaId;
+  // Se filtra por cantina a través del alumno
+  const data = await db.abono.findMany({
+    where: { estado, deletedAt: null, cuentaAlumno: { alumno: { cantinaId } } },
+    select: {
+      id: true, montoUsd: true, montoBs: true, metodo: true, banco: true, estado: true,
+      createdAt: true, confirmadoAt: true,
+      cuentaAlumno: {
+        select: {
+          alumnoId: true,
+          alumno: { select: { id: true, nombre: true, curso: true, cantinaId: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
   });
 
-  return NextResponse.json(filtrado);
+  return NextResponse.json(legacy(data));
 });

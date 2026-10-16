@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole, withAuth } from "@/lib/require-role";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
 
 interface DeudorRow {
   nombre: string;
@@ -15,64 +15,41 @@ export const GET = withAuth(async (_req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin");
 
   const cantinaId = session.user.cantinaId!;
-  const supabase  = createServerSupabase();
 
-  // Traer cuentas con saldo negativo
-  const { data: cuentas, error: cErr } = await supabase
-    .from("cuentas_alumnos")
-    .select(`
-      saldo,
-      alumnos!cuentas_alumnos_alumno_id_fkey ( id, nombre, curso, activo, deleted_at, cantina_id )
-    `)
-    .lt("saldo", 0);
+  // Cuentas con saldo negativo de alumnos activos de la cantina
+  const cuentas = await db.cuentaAlumno.findMany({
+    where: { saldo: { lt: 0 }, alumno: { cantinaId, activo: true, deletedAt: null } },
+    select: { saldo: true, alumno: { select: { id: true, nombre: true, curso: true } } },
+  });
 
-  if (cErr) throw cErr;
-
-  // Filtrar por cantina y alumno activo
-  const alumnoIds = (cuentas ?? [])
-    .filter(c => {
-      const a = c.alumnos as unknown as { cantina_id: string; activo: boolean; deleted_at: string | null } | null;
-      return a && a.cantina_id === cantinaId && a.activo && !a.deleted_at;
-    })
-    .map(c => (c.alumnos as unknown as { id: string }).id);
-
-  if (alumnoIds.length === 0) {
+  if (cuentas.length === 0) {
     return NextResponse.json({ deudores: [], porRango: [] });
   }
 
   // Última venta fiada por alumno
-  const { data: ultimasVentas } = await supabase
-    .from("ventas")
-    .select("alumno_id, created_at")
-    .in("alumno_id", alumnoIds)
-    .eq("es_fiado", true)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+  const ultimasVentas = await db.venta.findMany({
+    where: { alumnoId: { in: cuentas.map(c => c.alumno.id) }, esFiado: true, deletedAt: null },
+    select: { alumnoId: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
 
-  const ultimaPorAlumno: Record<string, string> = {};
-  for (const v of ultimasVentas ?? []) {
-    if (v.alumno_id && !ultimaPorAlumno[v.alumno_id]) {
-      ultimaPorAlumno[v.alumno_id] = v.created_at as string;
+  const ultimaPorAlumno: Record<string, Date> = {};
+  for (const v of ultimasVentas) {
+    if (v.alumnoId && !ultimaPorAlumno[v.alumnoId]) {
+      ultimaPorAlumno[v.alumnoId] = v.createdAt;
     }
   }
 
   const ahora = Date.now();
-  const deudores: DeudorRow[] = (cuentas ?? [])
-    .filter(c => {
-      const a = c.alumnos as unknown as { cantina_id: string; activo: boolean; deleted_at: string | null } | null;
-      return a && a.cantina_id === cantinaId && a.activo && !a.deleted_at;
-    })
+  const deudores: DeudorRow[] = cuentas
     .map(c => {
-      const a = c.alumnos as unknown as { id: string; nombre: string; curso: string };
-      const ultima = ultimaPorAlumno[a.id] ?? null;
-      const dias   = ultima
-        ? Math.floor((ahora - new Date(ultima).getTime()) / 86400000)
-        : 999;
+      const ultima = ultimaPorAlumno[c.alumno.id] ?? null;
+      const dias   = ultima ? Math.floor((ahora - ultima.getTime()) / 86400000) : 999;
       return {
-        nombre:           a.nombre,
-        curso:            a.curso,
-        saldo:            +Number(c.saldo).toFixed(2),
-        ultimaVentaFecha: ultima,
+        nombre:           c.alumno.nombre,
+        curso:            c.alumno.curso,
+        saldo:            +c.saldo.toNumber().toFixed(2),
+        ultimaVentaFecha: ultima?.toISOString() ?? null,
         diasDeuda:        dias,
       };
     })

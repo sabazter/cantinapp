@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
 import { audit, AuditEvent } from "@/lib/audit";
 import { notificarAbonoConfirmado, notificarAbonoRechazado } from "@/lib/notifications";
 
@@ -18,55 +18,41 @@ export const POST = withAuth(async (req: NextRequest, session, { params }: Ctx) 
   const { id } = await params;
   const cantinaId = session.user.cantinaId!;
 
-  const body     = await validateBody(req, accionSchema);
-  const supabase = createServerSupabase();
+  const body = await validateBody(req, accionSchema);
 
   // Verificar propiedad del abono
-  const { data: abono } = await supabase
-    .from("abonos")
-    .select(`
-      id, estado, monto_usd,
-      cuentas_alumnos ( id, saldo, alumno_id, alumnos(cantina_id) )
-    `)
-    .eq("id", id)
-    .is("deleted_at", null)
-    .single();
+  const abono = await db.abono.findFirst({
+    where: { id, deletedAt: null, cuentaAlumno: { alumno: { cantinaId } } },
+    select: {
+      estado: true, montoUsd: true,
+      cuentaAlumno: { select: { id: true, alumnoId: true, alumno: { select: { nombre: true } } } },
+    },
+  });
 
   if (!abono) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
-
-  type CuentaData = {
-    id: string;
-    saldo: string;
-    alumno_id: string;
-    alumnos: { cantina_id: string } | null;
-  };
-  const cuentaData = (Array.isArray(abono.cuentas_alumnos)
-    ? (abono.cuentas_alumnos as unknown as CuentaData[])[0]
-    : abono.cuentas_alumnos as unknown as CuentaData) ?? null;
-
-  if (cuentaData?.alumnos?.cantina_id !== cantinaId) {
-    return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
-  }
 
   if (abono.estado !== "pendiente") {
     return NextResponse.json({ error: "El abono ya fue procesado" }, { status: 400 });
   }
 
-  if (body.accion === "confirmar") {
-    await Promise.all([
-      supabase.from("abonos").update({
-        estado:        "confirmado",
-        confirmado_por: session.user.id,
-        confirmado_at:  new Date().toISOString(),
-      }).eq("id", id).then(() => {}),
+  const { id: cuentaId, alumnoId, alumno } = abono.cuentaAlumno;
+  const ahora = new Date();
 
-      // Sumar al saldo de la cuenta
-      cuentaData
-        ? supabase.from("cuentas_alumnos").update({
-            saldo: Number(cuentaData.saldo) + Number(abono.monto_usd),
-          }).eq("id", cuentaData.id).then(() => {})
-        : Promise.resolve(),
-    ]);
+  if (body.accion === "confirmar") {
+    // Transición condicional (solo si sigue pendiente): evita doble acreditación en confirmaciones simultáneas
+    const res = await db.abono.updateMany({
+      where: { id, estado: "pendiente" },
+      data: { estado: "confirmado", confirmadoPor: session.user.id, confirmadoAt: ahora },
+    });
+    if (res.count !== 1) {
+      return NextResponse.json({ error: "El abono ya fue procesado" }, { status: 400 });
+    }
+
+    // Sumar al saldo de la cuenta (incremento atómico)
+    await db.cuentaAlumno.update({
+      where: { id: cuentaId },
+      data: { saldo: { increment: abono.montoUsd } },
+    });
 
     await audit({
       usuarioId: session.user.id,
@@ -74,22 +60,19 @@ export const POST = withAuth(async (req: NextRequest, session, { params }: Ctx) 
       evento:    AuditEvent.ABONO_CONFIRMADO,
       entidad:   "abonos",
       entidadId: id,
-      datos:     { montoUsd: Number(abono.monto_usd), alumnoId: cuentaData?.alumno_id ?? null },
+      datos:     { montoUsd: abono.montoUsd.toNumber(), alumnoId },
     });
 
     // Notificar al representante (fire-and-forget, no bloquear la respuesta)
-    if (cuentaData?.alumno_id) {
-      const { data: alumno } = await supabase
-        .from("alumnos").select("nombre").eq("id", cuentaData.alumno_id).single();
-      if (alumno) notificarAbonoConfirmado(cuentaData.alumno_id, alumno.nombre).catch(() => {});
-    }
+    notificarAbonoConfirmado(alumnoId, alumno.nombre).catch(() => {});
   } else {
-    await supabase.from("abonos").update({
-      estado:         "rechazado",
-      motivo_rechazo: body.motivo,
-      confirmado_por: session.user.id,
-      confirmado_at:  new Date().toISOString(),
-    }).eq("id", id);
+    const res = await db.abono.updateMany({
+      where: { id, estado: "pendiente" },
+      data: { estado: "rechazado", motivoRechazo: body.motivo, confirmadoPor: session.user.id, confirmadoAt: ahora },
+    });
+    if (res.count !== 1) {
+      return NextResponse.json({ error: "El abono ya fue procesado" }, { status: 400 });
+    }
 
     await audit({
       usuarioId: session.user.id,
@@ -101,11 +84,7 @@ export const POST = withAuth(async (req: NextRequest, session, { params }: Ctx) 
     });
 
     // Notificar rechazo al representante (fire-and-forget)
-    if (cuentaData?.alumno_id) {
-      const { data: alumno } = await supabase
-        .from("alumnos").select("nombre").eq("id", cuentaData.alumno_id).single();
-      if (alumno) notificarAbonoRechazado(cuentaData.alumno_id, alumno.nombre, body.motivo).catch(() => {});
-    }
+    notificarAbonoRechazado(alumnoId, alumno.nombre, body.motivo).catch(() => {});
   }
 
   return NextResponse.json({ ok: true });

@@ -1,34 +1,21 @@
 import cron from "node-cron";
 import { actualizarTasaBcv } from "./bcv";
-import { createServerSupabase } from "./supabase-server";
+import { dbSystem } from "./db";
 
 let started = false;
 
 // Realiza la comprobación y actualización si no se ha registrado tasa para el día de hoy (UTC)
 async function verificarYActualizarTasaAlInicio() {
   try {
-    const supabase = createServerSupabase();
-    const { data: cantinas, error } = await supabase.from("cantinas").select("id");
-    if (error || !cantinas) {
-      console.error("[BCV Cron] Error al listar cantinas al inicio:", error);
-      return;
-    }
-
+    const cantinas = await dbSystem.cantina.findMany({ select: { id: true } });
     const hoy = new Date().toISOString().slice(0, 10);
 
     for (const cantina of cantinas) {
       // Verificar si ya existe una tasa registrada para hoy en esta cantina
-      const { data: tasaHoy, error: tasaError } = await supabase
-        .from("tasas_bcv")
-        .select("tasa_usd_bs")
-        .eq("cantina_id", cantina.id)
-        .eq("fecha", hoy)
-        .maybeSingle();
-
-      if (tasaError) {
-        console.error(`[BCV Cron] Error consultando tasa de hoy para cantina ${cantina.id}:`, tasaError);
-        continue;
-      }
+      const tasaHoy = await dbSystem.tasaBcv.findUnique({
+        where: { cantinaId_fecha: { cantinaId: cantina.id, fecha: new Date(hoy) } },
+        select: { tasaUsdBs: true },
+      });
 
       if (!tasaHoy) {
         console.log(`[BCV Cron] No se detectó tasa de hoy (${hoy}) para cantina ${cantina.id}. Ejecutando comprobación inicial...`);
@@ -39,7 +26,7 @@ async function verificarYActualizarTasaAlInicio() {
           console.error(`[BCV Cron] Error actualizando tasa al inicio para cantina ${cantina.id}:`, updateErr);
         }
       } else {
-        console.log(`[BCV Cron] La tasa de hoy (${hoy}) ya se encuentra registrada para la cantina ${cantina.id}: ${tasaHoy.tasa_usd_bs}`);
+        console.log(`[BCV Cron] La tasa de hoy (${hoy}) ya se encuentra registrada para la cantina ${cantina.id}: ${tasaHoy.tasaUsdBs}`);
       }
     }
   } catch (err) {
@@ -59,12 +46,7 @@ export function startBcvCron() {
   cron.schedule("0 0,12 * * *", async () => {
     try {
       console.log("[BCV Cron] Ejecutando actualización programada (8:00 AM / 8:00 PM VET)...");
-      const supabase = createServerSupabase();
-      const { data: cantinas, error } = await supabase.from("cantinas").select("id");
-      if (error || !cantinas) {
-        console.error("[BCV Cron] Error al listar cantinas en actualización programada:", error);
-        return;
-      }
+      const cantinas = await dbSystem.cantina.findMany({ select: { id: true } });
       for (const cantina of cantinas) {
         try {
           const tasa = await actualizarTasaBcv(cantina.id);

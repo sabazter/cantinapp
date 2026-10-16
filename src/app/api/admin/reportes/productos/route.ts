@@ -1,45 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole, withAuth } from "@/lib/require-role";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
 
 // GET /api/admin/reportes/productos?dias=30
 export const GET = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin");
 
   const cantinaId = session.user.cantinaId!;
-  const dias      = Math.min(Number(new URL(req.url).searchParams.get("dias") ?? "30"), 90);
-  const desde     = new Date(Date.now() - dias * 86400000).toISOString();
+  const dias      = Math.min(Math.max(Number(new URL(req.url).searchParams.get("dias") ?? "30") || 30, 1), 90);
+  const desde     = new Date(Date.now() - dias * 86400000);
 
-  const supabase = createServerSupabase();
+  // Solo ventas de esta cantina, no anuladas
+  const data = await db.detalleVenta.findMany({
+    where: { venta: { cantinaId, deletedAt: null, createdAt: { gte: desde } } },
+    select: {
+      cantidad: true,
+      precioUsdUnitario: true,
+      producto: { select: { id: true, nombre: true, categoria: true } },
+    },
+  });
 
-  const { data, error } = await supabase
-    .from("detalle_ventas")
-    .select(`
-      cantidad,
-      precio_usd_unitario,
-      productos!detalle_ventas_producto_id_fkey ( id, nombre, categoria ),
-      ventas!detalle_ventas_venta_id_fkey ( cantina_id, deleted_at, created_at )
-    `)
-    .gte("ventas.created_at", desde);
-
-  if (error) throw error;
-
-  // Filtrar por cantina y ventas no anuladas, luego agrupar por producto
+  // Agrupar por producto
   const map: Record<string, { nombre: string; categoria: string; cantidadVendida: number; ingresoUsd: number }> = {};
 
-  for (const row of data ?? []) {
-    const ventaRaw = row.ventas as unknown as { cantina_id: string; deleted_at: string | null } | null;
-    if (!ventaRaw || ventaRaw.cantina_id !== cantinaId || ventaRaw.deleted_at) continue;
-
-    const prodRaw = row.productos as unknown as { id: string; nombre: string; categoria: string } | null;
-    const prod = prodRaw;
+  for (const row of data) {
+    const prod = row.producto;
     if (!prod) continue;
 
     if (!map[prod.id]) {
       map[prod.id] = { nombre: prod.nombre, categoria: prod.categoria, cantidadVendida: 0, ingresoUsd: 0 };
     }
-    map[prod.id].cantidadVendida += Number(row.cantidad);
-    map[prod.id].ingresoUsd      += +(Number(row.precio_usd_unitario) * Number(row.cantidad)).toFixed(2);
+    map[prod.id].cantidadVendida += row.cantidad;
+    map[prod.id].ingresoUsd      += +(row.precioUsdUnitario.toNumber() * row.cantidad).toFixed(2);
   }
 
   const ranking = Object.values(map)

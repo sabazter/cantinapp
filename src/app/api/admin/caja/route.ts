@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole, withAuth } from "@/lib/require-role";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { rangoDia } from "@/lib/legacy";
 
 // GET /api/admin/caja?fecha=YYYY-MM-DD — resumen de cierre de caja
 export const GET = withAuth(async (req: NextRequest, session) => {
@@ -10,17 +11,15 @@ export const GET = withAuth(async (req: NextRequest, session) => {
   const { searchParams } = new URL(req.url);
   const fecha = searchParams.get("fecha") ?? new Date().toISOString().slice(0, 10);
 
-  const supabase = createServerSupabase();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    return NextResponse.json({ error: "Fecha inválida" }, { status: 400 });
+  }
+  const rango = rangoDia(fecha);
 
-  const { data: ventas, error } = await supabase
-    .from("ventas")
-    .select("total_usd, total_bs, metodo_pago, es_fiado")
-    .eq("cantina_id", cantinaId)
-    .is("deleted_at", null)
-    .gte("created_at", `${fecha}T00:00:00`)
-    .lte("created_at", `${fecha}T23:59:59`);
-
-  if (error) throw error;
+  const ventas = await db.venta.findMany({
+    where: { cantinaId, deletedAt: null, createdAt: rango },
+    select: { totalUsd: true, totalBs: true, metodoPago: true },
+  });
 
   // Calcular totales por método de pago
   type Metodo = "efectivo_usd" | "efectivo_bs" | "pago_movil" | "fiado";
@@ -34,40 +33,34 @@ export const GET = withAuth(async (req: NextRequest, session) => {
   let totalUsd = 0;
   let totalBs  = 0;
 
-  for (const v of ventas ?? []) {
-    const m = v.metodo_pago as Metodo;
-    const usd = Number(v.total_usd);
-    const bs  = Number(v.total_bs);
-    porMetodo[m].usd   += usd;
-    porMetodo[m].bs    += bs;
-    porMetodo[m].count += 1;
+  for (const v of ventas) {
+    const usd = v.totalUsd.toNumber();
+    const bs  = v.totalBs.toNumber();
+    const m = porMetodo[v.metodoPago];
+    m.usd   += usd;
+    m.bs    += bs;
+    m.count += 1;
     totalUsd += usd;
     totalBs  += bs;
   }
 
-  // Abonos confirmados del día
-  const { data: abonos } = await supabase
-    .from("abonos")
-    .select(`
-      monto_usd, metodo,
-      cuentas_alumnos ( alumnos ( cantina_id ) )
-    `)
-    .eq("estado", "confirmado")
-    .is("deleted_at", null)
-    .gte("confirmado_at", `${fecha}T00:00:00`)
-    .lte("confirmado_at", `${fecha}T23:59:59`);
-
-  const abonosDelDia = (abonos ?? []).filter(a => {
-    const ca = a.cuentas_alumnos as unknown as { alumnos: { cantina_id: string } | null } | null;
-    return ca?.alumnos?.cantina_id === cantinaId;
+  // Abonos confirmados del día (RLS limita a alumnos de la cantina)
+  const abonosDelDia = await db.abono.findMany({
+    where: {
+      estado: "confirmado",
+      deletedAt: null,
+      confirmadoAt: rango,
+      cuentaAlumno: { alumno: { cantinaId } },
+    },
+    select: { montoUsd: true },
   });
 
-  const totalAbonosUsd = abonosDelDia.reduce((s, a) => s + Number(a.monto_usd), 0);
+  const totalAbonosUsd = abonosDelDia.reduce((s, a) => s + a.montoUsd.toNumber(), 0);
 
   return NextResponse.json({
     fecha,
     ventas: {
-      count:    ventas?.length ?? 0,
+      count:    ventas.length,
       totalUsd,
       totalBs,
       porMetodo,

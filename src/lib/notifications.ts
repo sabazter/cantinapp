@@ -8,7 +8,7 @@ import {
   emailCuentaBloqueada,
 } from "./email/templates";
 import { wsNotificarFiado, wsNotificarAbonoConfirmado } from "./whatsapp";
-import { createServerSupabase } from "./supabase-server";
+import { dbSystem } from "./db";
 
 interface RepresentanteInfo {
   id:            string;
@@ -20,21 +20,24 @@ interface RepresentanteInfo {
 
 // Busca datos del representante de un alumno
 async function getRepresentante(alumnoId: string): Promise<RepresentanteInfo | null> {
-  const supabase = createServerSupabase();
-  const { data } = await supabase
-    .from("alumnos")
-    .select(`
-      representante_id,
-      usuarios!alumnos_representante_id_fkey (
-        id, email, telefono, notif_email, notif_whatsapp
-      )
-    `)
-    .eq("id", alumnoId)
-    .single();
+  const data = await dbSystem.alumno.findUnique({
+    where: { id: alumnoId },
+    select: {
+      representante: {
+        select: { id: true, email: true, telefono: true, notifEmail: true, notifWhatsapp: true },
+      },
+    },
+  });
 
-  if (!data?.representante_id) return null;
-  const rep = data.usuarios as unknown as RepresentanteInfo | null;
-  return rep ?? null;
+  const rep = data?.representante;
+  if (!rep) return null;
+  return {
+    id: rep.id,
+    email: rep.email,
+    telefono: rep.telefono,
+    notif_email: rep.notifEmail,
+    notif_whatsapp: rep.notifWhatsapp,
+  };
 }
 
 // Mantenemos el helper de email solo por compatibilidad con la firma original
@@ -46,15 +49,10 @@ async function getRepresentanteEmail(alumnoId: string): Promise<string | null> {
 
 // Busca el email del admin de la cantina
 async function getAdminEmail(cantinaId: string): Promise<string | null> {
-  const supabase = createServerSupabase();
-  const { data } = await supabase
-    .from("usuarios")
-    .select("email")
-    .eq("cantina_id", cantinaId)
-    .eq("rol", "admin")
-    .eq("activo", true)
-    .limit(1)
-    .single();
+  const data = await dbSystem.usuario.findFirst({
+    where: { cantinaId, rol: "admin", activo: true },
+    select: { email: true },
+  });
 
   return data?.email ?? null;
 }

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { legacy } from "@/lib/legacy";
 
 const productoSchema = z.object({
   nombre:         z.string().min(1).max(120),
@@ -12,41 +13,41 @@ const productoSchema = z.object({
   precioJornada:  z.number().positive().multipleOf(0.0001).nullable().optional(),
 });
 
+const SELECT_PRODUCTO = {
+  id: true, nombre: true, categoria: true, precioUsd: true, precioJornadaUsd: true,
+  stock: true, stockMin: true, activo: true,
+} as const;
+
 export const GET = withAuth(async (_req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin", "vendedor");
 
-  const supabase = createServerSupabase();
-  const { data, error } = await supabase
-    .from("productos")
-    .select("id, nombre, categoria, precio_usd, precio_jornada_usd, stock, stock_min, activo, created_at")
-    .eq("cantina_id", session.user.cantinaId!)
-    .order("nombre");
+  const data = await db.producto.findMany({
+    where: { cantinaId: session.user.cantinaId! },
+    select: { ...SELECT_PRODUCTO, createdAt: true },
+    orderBy: { nombre: "asc" },
+  });
 
-  if (error) throw error;
-  return NextResponse.json(data);
+  return NextResponse.json(legacy(data));
 });
 
 export const POST = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin");
 
   const body = await validateBody(req, productoSchema);
-  const supabase = createServerSupabase();
 
-  const { data, error } = await supabase
-    .from("productos")
-    .insert({
-      cantina_id:         session.user.cantinaId,
-      nombre:             body.nombre,
-      categoria:          body.categoria,
-      precio_usd:         body.precioUsd,
-      precio_jornada_usd: body.precioJornada ?? null,
-      stock:              0,
-      stock_min:          body.stockMin,
-      activo:             true,
-    })
-    .select("id, nombre, categoria, precio_usd, precio_jornada_usd, stock, stock_min, activo")
-    .single();
+  const data = await db.producto.create({
+    data: {
+      cantinaId:        session.user.cantinaId!,
+      nombre:           body.nombre,
+      categoria:        body.categoria,
+      precioUsd:        body.precioUsd,
+      precioJornadaUsd: body.precioJornada ?? null,
+      stock:            0,
+      stockMin:         body.stockMin,
+      activo:           true,
+    },
+    select: SELECT_PRODUCTO,
+  });
 
-  if (error) throw error;
-  return NextResponse.json(data, { status: 201 });
+  return NextResponse.json(legacy(data), { status: 201 });
 });

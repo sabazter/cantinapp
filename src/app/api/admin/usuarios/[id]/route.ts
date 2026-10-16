@@ -3,7 +3,8 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { legacy } from "@/lib/legacy";
 import { audit, AuditEvent } from "@/lib/audit";
 
 const editarUsuarioSchema = z.object({
@@ -18,39 +19,29 @@ export const PUT = withAuth(async (req: NextRequest, session, { params }: { para
   requireRole(session, "admin", "superadmin");
   const { id } = await params;
 
-  const supabase = createServerSupabase();
-
   // Verificar que el usuario pertenece a la misma cantina
-  const { data: target, error: fetchErr } = await supabase
-    .from("usuarios")
-    .select("id, cantina_id, email")
-    .eq("id", id)
-    .single();
+  const target = await db.usuario.findUnique({
+    where: { id },
+    select: { id: true, cantinaId: true, email: true },
+  });
 
-  if (fetchErr || !target) {
-    return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
-  }
-  if (target.cantina_id !== session.user.cantinaId) {
+  if (!target || target.cantinaId !== session.user.cantinaId) {
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
   }
 
   const body = await validateBody(req, editarUsuarioSchema);
-  const updates: Record<string, unknown> = {};
 
-  if (body.nombre   !== undefined) updates.nombre   = body.nombre;
-  if (body.telefono !== undefined) updates.telefono = body.telefono;
-  if (body.rol      !== undefined) updates.rol      = body.rol;
-  if (body.activo   !== undefined) updates.activo   = body.activo;
-  if (body.password !== undefined) updates.hash_pwd = await bcrypt.hash(body.password, 12);
-
-  const { data, error } = await supabase
-    .from("usuarios")
-    .update(updates)
-    .eq("id", id)
-    .select("id, nombre, email, rol, activo")
-    .single();
-
-  if (error) throw error;
+  const data = await db.usuario.update({
+    where: { id },
+    data: {
+      ...(body.nombre   !== undefined && { nombre: body.nombre }),
+      ...(body.telefono !== undefined && { telefono: body.telefono }),
+      ...(body.rol      !== undefined && { rol: body.rol }),
+      ...(body.activo   !== undefined && { activo: body.activo }),
+      ...(body.password !== undefined && { hashPwd: await bcrypt.hash(body.password, 12) }),
+    },
+    select: { id: true, nombre: true, email: true, rol: true, activo: true },
+  });
 
   if (body.password !== undefined) {
     await audit({
@@ -64,7 +55,7 @@ export const PUT = withAuth(async (req: NextRequest, session, { params }: { para
 
   if (body.activo === false) {
     // Desactivar también al Alumno asociado
-    await supabase.from("alumnos").update({ activo: false }).eq("representante_id", id);
+    await db.alumno.updateMany({ where: { representanteId: id }, data: { activo: false } });
     await audit({
       usuarioId: session.user.id,
       cantinaId: session.user.cantinaId ?? undefined,
@@ -75,7 +66,7 @@ export const PUT = withAuth(async (req: NextRequest, session, { params }: { para
     });
   } else if (body.activo === true) {
     // Activar también al Alumno asociado
-    await supabase.from("alumnos").update({ activo: true }).eq("representante_id", id);
+    await db.alumno.updateMany({ where: { representanteId: id }, data: { activo: true } });
     await audit({
       usuarioId: session.user.id,
       cantinaId: session.user.cantinaId ?? undefined,
@@ -86,7 +77,7 @@ export const PUT = withAuth(async (req: NextRequest, session, { params }: { para
     });
   }
 
-  return NextResponse.json(data);
+  return NextResponse.json(legacy(data));
 });
 
 export const DELETE = withAuth(async (_req: NextRequest, session, { params }: { params: Promise<{ id: string }> }) => {
@@ -97,26 +88,22 @@ export const DELETE = withAuth(async (_req: NextRequest, session, { params }: { 
     return NextResponse.json({ error: "No puedes desactivar tu propia cuenta" }, { status: 400 });
   }
 
-  const supabase = createServerSupabase();
+  const target = await db.usuario.findUnique({
+    where: { id },
+    select: { cantinaId: true, email: true },
+  });
 
-  const { data: target } = await supabase
-    .from("usuarios")
-    .select("cantina_id, email")
-    .eq("id", id)
-    .single();
-
-  if (!target || target.cantina_id !== session.user.cantinaId) {
+  if (!target || target.cantinaId !== session.user.cantinaId) {
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
   }
 
-  await supabase.from("usuarios").update({ activo: false }).eq("id", id);
+  await db.usuario.update({ where: { id }, data: { activo: false } });
 
   // Revocar todos los refresh tokens del usuario
-  await supabase
-    .from("refresh_tokens")
-    .update({ revoked_at: new Date().toISOString() })
-    .eq("usuario_id", id)
-    .is("revoked_at", null);
+  await db.refreshToken.updateMany({
+    where: { usuarioId: id, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
 
   await audit({
     usuarioId: session.user.id,

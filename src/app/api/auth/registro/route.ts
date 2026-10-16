@@ -3,19 +3,21 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { SignJWT } from "jose";
 import QRCode from "qrcode";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { dbSystem } from "@/lib/db";
 import { encrypt } from "@/lib/crypto";
 import { sendEmail } from "@/lib/email/resend";
 import { emailBienvenidaRepresentante, emailNuevoRegistroAdmin, emailBienvenidaProfesor, emailNuevoRegistroProfesorAdmin } from "@/lib/email/templates";
 import { audit } from "@/lib/audit";
+import { clientIp } from "@/lib/ip";
+import { aplicarLimites } from "@/lib/rate-limit";
 
 const registroSchema = z.object({
   // Datos del representante
   nombre:    z.string().min(2).max(100),
   email:     z.string().email(),
-  password:  z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
+  password:  z.string().min(8, "La contraseña debe tener al menos 8 caracteres").max(72),
   telefono:  z.string().max(20).optional(),
-  cantinaId: z.string().optional(),
+  cantinaId: z.string().max(50).optional(),
   rol:       z.enum(["representante", "profesor"]).default("representante"),
 
   // Datos del alumno
@@ -28,6 +30,9 @@ const registroSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const limitado = await aplicarLimites(req, "registro");
+  if (limitado) return limitado;
+
   let body: z.infer<typeof registroSchema>;
   try {
     const raw = await req.json();
@@ -43,125 +48,97 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Body inválido" }, { status: 400 });
   }
 
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
-    req.headers.get("x-real-ip") ??
-    "unknown";
-
-  const supabase = createServerSupabase();
+  const ip = clientIp((n) => req.headers.get(n));
 
   // Resolver cantina
-  let cantinaId = body.cantinaId ?? null;
-  if (!cantinaId) {
-    const { data: cantinas } = await supabase
-      .from("cantinas")
-      .select("id")
-      .limit(1)
-      .single();
-    cantinaId = cantinas?.id ?? null;
-  }
+  const cantina = body.cantinaId
+    ? await dbSystem.cantina.findUnique({ where: { id: body.cantinaId }, select: { id: true } })
+    : await dbSystem.cantina.findFirst({ select: { id: true }, orderBy: { createdAt: "asc" } });
 
-  if (!cantinaId) {
+  if (!cantina) {
     return NextResponse.json({ error: "Cantina no encontrada" }, { status: 400 });
   }
+  const cantinaId = cantina.id;
 
   // Verificar que el email no existe
-  const { data: existing } = await supabase
-    .from("usuarios")
-    .select("id")
-    .eq("email", body.email)
-    .maybeSingle();
-
+  const existing = await dbSystem.usuario.findUnique({ where: { email: body.email }, select: { id: true } });
   if (existing) {
     return NextResponse.json({ error: "El email ya está registrado" }, { status: 409 });
   }
 
-  // Hash de contraseña
+  // Cifrar cédula si se proporcionó. Si el cifrado falla se aborta: nunca se guarda en claro.
+  let cedulaEncriptada: string | null = null;
+  if (body.alumno.cedula) {
+    try {
+      cedulaEncriptada = encrypt(body.alumno.cedula);
+    } catch (err) {
+      console.error("[registro] Cifrado de cédula falló:", err instanceof Error ? err.message : "error");
+      return NextResponse.json({ error: "Error al registrar el alumno" }, { status: 500 });
+    }
+  }
+
   const hashPwd = await bcrypt.hash(body.password, 12);
+  const esProfesor = body.rol === "profesor";
 
-  // Crear representante/profesor
-  const { data: usuario, error: userErr } = await supabase
-    .from("usuarios")
-    .insert({
-      cantina_id:      cantinaId,
-      nombre:          body.nombre,
-      email:           body.email,
-      hash_pwd:        hashPwd,
-      rol:             body.rol,
-      telefono:        body.telefono ?? null,
-      activo:          body.rol === "profesor" ? false : true,
-      email_verificado: false,
-    })
-    .select("id")
-    .single();
+  // Usuario + alumno + cuenta + QR en una sola transacción: o se crea todo o nada
+  let usuarioId: string;
+  try {
+    usuarioId = await dbSystem.$transaction(async (tx) => {
+      const usuario = await tx.usuario.create({
+        data: {
+          cantinaId,
+          nombre:          body.nombre,
+          email:           body.email,
+          hashPwd,
+          rol:             body.rol,
+          telefono:        body.telefono ?? null,
+          activo:          !esProfesor,
+          emailVerificado: false,
+        },
+        select: { id: true },
+      });
 
-  if (userErr || !usuario) {
-    console.error("[registro] Error al crear usuario:", userErr);
+      const alumno = await tx.alumno.create({
+        data: {
+          cantinaId,
+          representanteId:  usuario.id,
+          nombre:           body.alumno.nombre,
+          cedulaEncriptada,
+          curso:            body.alumno.curso,
+          seccion:          body.alumno.seccion ?? null,
+          activo:           !esProfesor,
+          fiadoHabilitado:  false,
+          consentimientoIp: ip,
+          consentimientoAt: new Date(),
+          cuenta:           { create: { saldo: 0 } },
+        },
+        select: { id: true },
+      });
+
+      await tx.alumno.update({
+        where: { id: alumno.id },
+        data: { qrCode: await QRCode.toDataURL(`cantinapp:alumno:${alumno.id}`) },
+      });
+
+      return usuario.id;
+    });
+  } catch (err) {
+    console.error("[registro] Error al crear la cuenta:", err instanceof Error ? err.message : "error");
     return NextResponse.json({ error: "Error al crear la cuenta" }, { status: 500 });
   }
 
-  // Cifrar cédula si se proporcionó
-  let cedulaEncriptada: string | null = null;
-  try {
-    if (body.alumno.cedula) cedulaEncriptada = encrypt(body.alumno.cedula);
-  } catch {
-    // Si falta ENCRYPTION_KEY en dev, continuar sin cifrar
-    cedulaEncriptada = body.alumno.cedula ?? null;
-  }
-
-  // Crear alumno
-  const { data: alumno, error: alumnoErr } = await supabase
-    .from("alumnos")
-    .insert({
-      cantina_id:        cantinaId,
-      representante_id:  usuario.id,
-      nombre:            body.alumno.nombre,
-      cedula_encriptada: cedulaEncriptada,
-      curso:             body.alumno.curso,
-      seccion:           body.alumno.seccion ?? null,
-      activo:            body.rol === "profesor" ? false : true,
-      fiado_habilitado:  false,
-      consentimiento_ip: ip,
-      consentimiento_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-
-  if (alumnoErr || !alumno) {
-    // Rollback usuario
-    await supabase.from("usuarios").delete().eq("id", usuario.id);
-    console.error("[registro] Error al crear alumno:", alumnoErr);
-    return NextResponse.json({ error: "Error al registrar el alumno" }, { status: 500 });
-  }
-
-  // Crear cuenta corriente + QR en paralelo
-  const qrData = await QRCode.toDataURL(`cantinapp:alumno:${alumno.id}`);
-  await Promise.all([
-    supabase.from("cuentas_alumnos").insert({ alumno_id: alumno.id, saldo: 0 }),
-    supabase.from("alumnos").update({ qr_code: qrData }).eq("id", alumno.id),
-  ]);
-
   // Token de verificación de email (JWT, 24h)
   const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET!);
-  const verToken = await new SignJWT({ sub: usuario.id, type: "email_verify" })
+  const verToken = await new SignJWT({ sub: usuarioId, type: "email_verify" })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("24h")
     .sign(secret);
 
-  // Notificaciones en paralelo
-  const [adminData] = await Promise.all([
-    supabase
-      .from("usuarios")
-      .select("email")
-      .eq("cantina_id", cantinaId)
-      .eq("rol", "admin")
-      .eq("activo", true)
-      .limit(1)
-      .single(),
-  ]);
-
-  const esProfesor = body.rol === "profesor";
+  const admin = await dbSystem.usuario.findFirst({
+    where: { cantinaId, rol: "admin", activo: true },
+    select: { email: true },
+  });
 
   await Promise.all([
     sendEmail({
@@ -170,20 +147,20 @@ export async function POST(req: NextRequest) {
         ? emailBienvenidaProfesor(body.nombre, verToken)
         : emailBienvenidaRepresentante(body.nombre, verToken)),
     }),
-    adminData.data?.email
+    admin?.email
       ? sendEmail({
-          to: adminData.data.email as string,
+          to: admin.email,
           ...(esProfesor
             ? emailNuevoRegistroProfesorAdmin(body.nombre, body.email, cantinaId)
             : emailNuevoRegistroAdmin(body.nombre, body.email, body.alumno.nombre, cantinaId)),
         })
       : Promise.resolve(),
     audit({
-      usuarioId: usuario.id,
+      usuarioId,
       cantinaId,
       evento: esProfesor ? "registro_profesor" : "registro_representante",
       entidad: "usuarios",
-      entidadId: usuario.id,
+      entidadId: usuarioId,
       datos: { ip, alumno: body.alumno.nombre },
     }),
   ]);

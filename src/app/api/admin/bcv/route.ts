@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole, withAuth } from "@/lib/require-role";
 import { validateBody } from "@/lib/validate";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
+import { legacy, fechaISO } from "@/lib/legacy";
 import { audit, AuditEvent } from "@/lib/audit";
 import { tasaActivaBcv } from "@/lib/bcv";
 
@@ -11,19 +12,21 @@ export const GET = withAuth(async (_req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin", "vendedor", "directivo");
 
   const cantinaId = session.user.cantinaId!;
-  const supabase = createServerSupabase();
 
-  const [activa, { data: historial }] = await Promise.all([
+  const [activa, historial] = await Promise.all([
     tasaActivaBcv(cantinaId),
-    supabase
-      .from("tasas_bcv")
-      .select("id, fecha, tasa_usd_bs, fuente, created_at")
-      .eq("cantina_id", cantinaId)
-      .order("fecha", { ascending: false })
-      .limit(30),
+    db.tasaBcv.findMany({
+      where: { cantinaId },
+      select: { id: true, fecha: true, tasaUsdBs: true, fuente: true, createdAt: true },
+      orderBy: { fecha: "desc" },
+      take: 30,
+    }),
   ]);
 
-  return NextResponse.json({ activa, historial: historial ?? [] });
+  return NextResponse.json({
+    activa,
+    historial: historial.map(h => ({ ...legacy<Record<string, unknown>>(h), fecha: fechaISO(h.fecha) })),
+  });
 });
 
 const overrideSchema = z.object({
@@ -38,21 +41,19 @@ export const POST = withAuth(async (req: NextRequest, session) => {
   const cantinaId = session.user.cantinaId!;
   const { tasa, fecha } = await validateBody(req, overrideSchema);
   const diaObjetivo = fecha ?? new Date().toISOString().slice(0, 10);
-
-  const supabase = createServerSupabase();
+  const dia = new Date(diaObjetivo);
 
   // Leer tasa anterior para el audit log
-  const { data: anterior } = await supabase
-    .from("tasas_bcv")
-    .select("tasa_usd_bs")
-    .eq("cantina_id", cantinaId)
-    .eq("fecha", diaObjetivo)
-    .single();
+  const anterior = await db.tasaBcv.findUnique({
+    where: { cantinaId_fecha: { cantinaId, fecha: dia } },
+    select: { tasaUsdBs: true },
+  });
 
-  await supabase.from("tasas_bcv").upsert(
-    { cantina_id: cantinaId, fecha: diaObjetivo, tasa_usd_bs: tasa, fuente: "manual" },
-    { onConflict: "cantina_id,fecha" }
-  );
+  await db.tasaBcv.upsert({
+    where: { cantinaId_fecha: { cantinaId, fecha: dia } },
+    create: { cantinaId, fecha: dia, tasaUsdBs: tasa, fuente: "manual" },
+    update: { tasaUsdBs: tasa, fuente: "manual" },
+  });
 
   await audit({
     usuarioId: session.user.id,
@@ -61,7 +62,7 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     entidad:   "tasas_bcv",
     datos: {
       fecha:         diaObjetivo,
-      tasaAnterior:  anterior ? Number(anterior.tasa_usd_bs) : null,
+      tasaAnterior:  anterior ? anterior.tasaUsdBs.toNumber() : null,
       tasaNueva:     tasa,
       fuente:        "manual",
     },
