@@ -1,13 +1,77 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: cantinapp-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: cantinapp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: cantinapp
+    volumes:
+      - cantinapp_pgdata:/var/lib/postgresql/data
+    # Solo loopback: lo usa `prisma migrate dev` desde el host; no se expone a la red.
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cantinapp -d cantinapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: cantinapp-redis
+    restart: always
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?define REDIS_PASSWORD en .env}"]
+    volumes:
+      - cantinapp_redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+  # Aplica las migraciones de Prisma y termina. La app arranca solo si finaliza bien.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: cantinapp-migrate
+    command: ["npx", "prisma", "migrate", "deploy"]
+    environment:
+      DATABASE_URL: postgresql://cantinapp:${POSTGRES_PASSWORD}@postgres:5432/cantinapp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   cantinapp:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
     container_name: cantinapp
     restart: always
     ports:
       - "3005:3000"
     env_file:
       - .env
+    environment:
+      # Tienen prioridad sobre lo que haya en .env
+      DATABASE_URL: postgresql://cantinapp:${POSTGRES_PASSWORD}@postgres:5432/cantinapp
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - cantinapp_uploads:/app/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  cantinapp_pgdata:
+  cantinapp_redisdata:
+  cantinapp_uploads:

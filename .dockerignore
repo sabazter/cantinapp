@@ -10,3 +10,7 @@ CHANGELOG.md
 ROADMAP.md
 .agents/
 skills-lock.json
+
+uploads
+*.log
+.claude
