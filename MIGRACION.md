@@ -39,7 +39,8 @@ Dentro de una misma request las consultas deben ir **en serie** (no `Promise.all
 
 La app **nunca** recibe las contraseñas de Postgres ni de Redis como variables sueltas: solo las URLs de su rol (`DATABASE_URL`, `DATABASE_SYSTEM_URL`, `REDIS_URL`), que inyecta `docker-compose.yml`. Ver `.env.example` y `.env.app.example`. Se eliminan `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` y `DIRECT_URL`.
 
-> `TRUST_PROXY=false` (sin proxy): las cabeceras `x-forwarded-for` se ignoran porque cualquiera puede falsificarlas. El límite por IP funciona como un cupo común; el login además se limita por email.
+> **Cadena de producción:** Cloudflare (HTTPS) → `cloudflared` → `nginx` (:80) → app (:3005). Por eso `TRUST_PROXY=true`: la IP del cliente sale de `CF-Connecting-IP` o de la primera IP pública de `X-Forwarded-For` leída de derecha a izquierda (nginx añade `127.0.0.1` al final). Con `false` todos los usuarios compartirían un único cupo (10 logins/min y 5 registros/hora para todo el mundo). El login además se limita por email.
+> `NEXTAUTH_URL` debe ser `https://cantinapp.sjgmtech.qzz.io` (el dominio solo responde bien por HTTPS): así la cookie de sesión sale `Secure` y los enlaces de los correos son válidos.
 
 ## Checklist de salida a producción (20 puntos)
 
