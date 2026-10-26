@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole, withAuth } from "@/lib/require-role";
-import { validateBody } from "@/lib/validate";
+import { validateBody, safeText } from "@/lib/validate";
 import { createServerSupabase } from "@/lib/supabase-server";
 import { audit, AuditEvent } from "@/lib/audit";
 
 const entradaSchema = z.object({
   cantidad: z.number().int().min(1),
-  motivo:   z.string().max(200).optional(),
+  motivo:   safeText(1, 200).optional(),
 });
 
 // POST /api/admin/inventario/[id]/entrada

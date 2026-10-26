@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Pencil, PackagePlus, SlidersHorizontal, History, AlertTriangle, UtensilsCrossed } from "lucide-react";
+import { Plus, Pencil, PackagePlus, SlidersHorizontal, History, AlertTriangle, UtensilsCrossed, Trash2, Eye, EyeOff, MoreHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -49,7 +49,13 @@ interface Movimiento {
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
 const productoSchema = z.object({
-  nombre:    z.string().min(1, "Requerido"),
+  nombre: z
+    .string()
+    .min(1, "El nombre es requerido")
+    .max(120, "Máximo 120 caracteres")
+    .refine((val) => !/<[^>]*>/i.test(val) && !/[<>]/.test(val), {
+      message: "No se permiten etiquetas HTML ni caracteres < o >",
+    }),
   categoria: z.enum(["tienda", "menu"]),
   precioUsd: z.number().positive("Debe ser mayor a 0"),
   stockMin:  z.number().int().min(0),
@@ -69,7 +75,12 @@ const jornadaSchema = z.object({
   precioJornada: z.number().positive("Debe ser mayor a 0").nullable(),
 });
 
+const productoEditarSchema = productoSchema.extend({
+  activo: z.boolean().optional(),
+});
+
 type ProductoForm = z.infer<typeof productoSchema>;
+type ProductoEditarForm = z.infer<typeof productoEditarSchema>;
 type EntradaForm  = z.infer<typeof entradaSchema>;
 type AjusteForm   = z.infer<typeof ajusteSchema>;
 type JornadaForm  = z.infer<typeof jornadaSchema>;
@@ -145,7 +156,7 @@ export function InventarioClient() {
   };
 
   // ── Editar ─────────────────────────────────────────────────────────────────
-  const editarForm = useForm<ProductoForm>({ resolver: zodResolver(productoSchema) });
+  const editarForm = useForm<ProductoEditarForm>({ resolver: zodResolver(productoEditarSchema) });
 
   const abrirEditar = (p: Producto) => {
     editarForm.reset({
@@ -153,11 +164,12 @@ export function InventarioClient() {
       categoria: p.categoria,
       precioUsd: Number(p.precio_usd),
       stockMin:  p.stock_min,
+      activo:    p.activo,
     });
     setModalEditar(p);
   };
 
-  const onEditar = async (data: ProductoForm) => {
+  const onEditar = async (data: ProductoEditarForm) => {
     if (!modalEditar) return;
     const res = await fetch(`/api/admin/inventario/${modalEditar.id}`, {
       method: "PUT",
@@ -169,7 +181,8 @@ export function InventarioClient() {
       setModalEditar(null);
       fetchProductos();
     } else {
-      toast.error("Error al actualizar");
+      const err = await res.json().catch(() => ({}));
+      toast.error(err.error ?? "Error al actualizar");
     }
   };
 
@@ -248,12 +261,44 @@ export function InventarioClient() {
     }
   };
 
-  // ── Desactivar ─────────────────────────────────────────────────────────────
-  const onDesactivar = async (p: Producto) => {
-    if (!confirm(`¿Desactivar "${p.nombre}"?`)) return;
-    await fetch(`/api/admin/inventario/${p.id}`, { method: "DELETE" });
-    toast.success("Producto desactivado");
-    fetchProductos();
+  // ── Activar / Desactivar ───────────────────────────────────────────────────
+  const onToggleActivo = async (p: Producto, nuevoEstado: boolean) => {
+    const accion = nuevoEstado ? "activar" : "desactivar";
+    if (!confirm(`¿Deseas ${accion} el producto "${p.nombre}"?`)) return;
+    const res = await fetch(`/api/admin/inventario/${p.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activo: nuevoEstado }),
+    });
+    if (res.ok) {
+      toast.success(`Producto ${nuevoEstado ? "activado" : "desactivado"}`);
+      fetchProductos();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      toast.error(err.error ?? `Error al ${accion} producto`);
+    }
+  };
+
+  // ── Eliminar definitivamente ────────────────────────────────────────────────
+  const onEliminar = async (p: Producto) => {
+    if (
+      !confirm(
+        `¿Estás seguro de que deseas eliminar permanentemente "${p.nombre}"?\n\nEsta acción no se puede deshacer.`
+      )
+    ) {
+      return;
+    }
+    const res = await fetch(`/api/admin/inventario/${p.id}?permanent=true`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      toast.success("Producto eliminado exitosamente");
+      if (modalEditar?.id === p.id) setModalEditar(null);
+      fetchProductos();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      toast.error(data.error ?? "No se pudo eliminar el producto");
+    }
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -373,14 +418,22 @@ export function InventarioClient() {
                           <DropdownMenuItem onClick={() => abrirHistorial(p)}>
                             <History className="h-4 w-4 mr-2" /> Historial
                           </DropdownMenuItem>
-                          {p.activo && (
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onClick={() => onDesactivar(p)}
-                            >
-                              Desactivar
+                          <Separator className="my-1" />
+                          {p.activo ? (
+                            <DropdownMenuItem onClick={() => onToggleActivo(p, false)}>
+                              <EyeOff className="h-4 w-4 mr-2" /> Desactivar
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem onClick={() => onToggleActivo(p, true)}>
+                              <Eye className="h-4 w-4 mr-2 text-green-600" /> Activar
                             </DropdownMenuItem>
                           )}
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                            onClick={() => onEliminar(p)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" /> Eliminar definitivamente
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -454,11 +507,34 @@ export function InventarioClient() {
             <Field label="Stock mínimo" error={editarForm.formState.errors.stockMin?.message}>
               <Input {...editarForm.register("stockMin", { valueAsNumber: true })} type="number" />
             </Field>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setModalEditar(null)}>Cancelar</Button>
-              <Button type="submit" disabled={editarForm.formState.isSubmitting}>
-                {editarForm.formState.isSubmitting ? "Guardando..." : "Guardar"}
+            <Field label="Estado" error={undefined}>
+              <Select
+                value={editarForm.watch("activo") ? "activo" : "inactivo"}
+                onValueChange={(v) => editarForm.setValue("activo", v === "activo")}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="activo">Activo</SelectItem>
+                  <SelectItem value="inactivo">Inactivo</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <DialogFooter className="flex justify-between items-center sm:justify-between">
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={() => modalEditar && onEliminar(modalEditar)}
+              >
+                <Trash2 className="h-4 w-4 mr-1.5" />
+                Eliminar
               </Button>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" onClick={() => setModalEditar(null)}>Cancelar</Button>
+                <Button type="submit" disabled={editarForm.formState.isSubmitting}>
+                  {editarForm.formState.isSubmitting ? "Guardando..." : "Guardar"}
+                </Button>
+              </div>
             </DialogFooter>
           </form>
         </DialogContent>

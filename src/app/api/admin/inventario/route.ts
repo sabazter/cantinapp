@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole, withAuth } from "@/lib/require-role";
-import { validateBody } from "@/lib/validate";
+import { validateBody, safeText } from "@/lib/validate";
 import { createServerSupabase } from "@/lib/supabase-server";
 
 const productoSchema = z.object({
-  nombre:         z.string().min(1).max(120),
+  nombre:         safeText(1, 120),
   categoria:      z.enum(["tienda", "menu"]),
   precioUsd:      z.number().positive().multipleOf(0.0001),
   stockMin:       z.number().int().min(0).default(5),

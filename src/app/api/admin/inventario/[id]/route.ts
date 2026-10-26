@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole, withAuth } from "@/lib/require-role";
-import { validateBody } from "@/lib/validate";
+import { validateBody, safeText } from "@/lib/validate";
 import { createServerSupabase } from "@/lib/supabase-server";
 
 const editarSchema = z.object({
-  nombre:        z.string().min(1).max(120).optional(),
+  nombre:        safeText(1, 120).optional(),
   categoria:     z.enum(["tienda", "menu"]).optional(),
   precioUsd:     z.number().positive().multipleOf(0.0001).optional(),
   precioJornada: z.number().positive().multipleOf(0.0001).nullable().optional(),
@@ -53,7 +53,7 @@ export const PUT = withAuth(async (req: NextRequest, session, { params }: { para
   return NextResponse.json(data);
 });
 
-export const DELETE = withAuth(async (_req: NextRequest, session, { params }: { params: Promise<{ id: string }> }) => {
+export const DELETE = withAuth(async (req: NextRequest, session, { params }: { params: Promise<{ id: string }> }) => {
   requireRole(session, "admin", "superadmin");
   const { id } = await params;
 
@@ -61,7 +61,39 @@ export const DELETE = withAuth(async (_req: NextRequest, session, { params }: { 
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
   }
 
+  const { searchParams } = new URL(req.url);
+  const permanent = searchParams.get("permanent") === "true";
+
   const supabase = createServerSupabase();
+
+  if (permanent) {
+    // Comprobar si tiene ventas registradas en detalle_ventas
+    const { count: ventasCount } = await supabase
+      .from("detalle_ventas")
+      .select("id", { count: "exact", head: true })
+      .eq("producto_id", id);
+
+    if (ventasCount && ventasCount > 0) {
+      return NextResponse.json(
+        {
+          error: "No se puede eliminar permanentemente porque tiene ventas registradas en el historial. Puedes desactivarlo para que no aparezca en el catálogo.",
+          hasSales: true,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Eliminar movimientos de inventario asociados para evitar restricción de clave foránea
+    await supabase.from("movimientos_inventario").delete().eq("producto_id", id);
+
+    // Eliminar el producto definitivamente
+    const { error: delError } = await supabase.from("productos").delete().eq("id", id);
+    if (delError) throw delError;
+
+    return NextResponse.json({ success: true, message: "Producto eliminado definitivamente" });
+  }
+
+  // Desactivación lógica (soft-delete)
   await supabase.from("productos").update({ activo: false }).eq("id", id);
-  return new NextResponse(null, { status: 204 });
+  return NextResponse.json({ success: true, message: "Producto desactivado" });
 });

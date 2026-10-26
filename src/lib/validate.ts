@@ -1,6 +1,19 @@
 import { z, ZodSchema } from "zod";
 import { NextResponse } from "next/server";
 
+/**
+ * Validador Zod para texto seguro sin inyección de etiquetas HTML ni caracteres < >
+ */
+export const safeText = (min = 1, max = 120) =>
+  z
+    .string()
+    .min(min, `Debe tener al menos ${min} caracter(es)`)
+    .max(max, `Máximo ${max} caracteres`)
+    .refine((val) => !/<[^>]*>/i.test(val) && !/[<>]/.test(val), {
+      message: "No se permiten etiquetas HTML ni caracteres < o >",
+    })
+    .transform((val) => val.trim());
+
 export class ValidationError extends Error {
   status = 400;
   issues: z.ZodIssue[];
