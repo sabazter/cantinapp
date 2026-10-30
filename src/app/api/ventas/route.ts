@@ -21,8 +21,7 @@ const ventaSchema = z.object({
   items:      z.array(itemSchema).min(1, "El carrito está vacío"),
 });
 
-// Toda la venta corre en la transacción del request (withAuth): si cualquier paso falla o se
-// responde con status >= 400, no queda stock descontado, deuda registrada ni venta a medias.
+// Toda la venta corre en la transacción del request (withAuth)
 export const POST = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "vendedor", "admin", "superadmin");
 
@@ -52,7 +51,7 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     }
   }
 
-  // Calcular totales con aritmética decimal (precios y tasa nunca pasan por float)
+  // Calcular totales con aritmética decimal
   const precioEfectivo = (id: string) => {
     const p = porId.get(id)!;
     return p.precioJornadaUsd ?? p.precioUsd;
@@ -63,7 +62,7 @@ export const POST = withAuth(async (req: NextRequest, session) => {
   );
   const totalBs = totalUsd.times(tasaBcv);
 
-  // El alumno, si viene, debe pertenecer a esta cantina (también para pagos que no son fiado)
+  // Validar alumno
   if (body.alumnoId) {
     const alumno = await db.alumno.findFirst({
       where: { id: body.alumnoId, cantinaId, deletedAt: null },
@@ -92,7 +91,7 @@ export const POST = withAuth(async (req: NextRequest, session) => {
       return NextResponse.json({ error: "Este alumno no tiene el fiado habilitado" }, { status: 403 });
     }
 
-    // Bloquea la cuenta hasta el commit: dos fiados simultáneos no pueden saltarse el límite
+    // Bloquea la cuenta hasta el commit
     const filas = await db.$queryRaw<{ saldo: Prisma.Decimal }[]>`
       SELECT saldo FROM cuentas_alumnos WHERE alumno_id = ${body.alumnoId} FOR UPDATE`;
     const saldoActual = filas[0]?.saldo ?? new Prisma.Decimal(0);
@@ -105,19 +104,7 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     }
   }
 
-  // Descontar stock de forma atómica y condicional: UPDATE ... WHERE stock >= cantidad
-  for (const item of body.items) {
-    const res = await db.producto.updateMany({
-      where: { id: item.productoId, cantinaId, activo: true, stock: { gte: item.cantidad } },
-      data: { stock: { decrement: item.cantidad } },
-    });
-    if (res.count !== 1) {
-      const nombre = porId.get(item.productoId)!.nombre;
-      return NextResponse.json({ error: `Stock insuficiente para "${nombre}"` }, { status: 400 });
-    }
-  }
-
-  // Registrar la venta con su detalle
+  // Registrar la venta con su detalle (sin control de stock físico)
   const venta = await db.venta.create({
     data: {
       cantinaId,
@@ -140,8 +127,8 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     select: { id: true },
   });
 
-  // Registrar la deuda si es fiado (la fila ya está bloqueada)
-  if (body.metodoPago === "fiado" && body.alumnoId) {
+  // Registrar el débito en la cuenta corriente del alumno si aplica
+  if (body.alumnoId) {
     const res = await db.cuentaAlumno.updateMany({
       where: { alumnoId: body.alumnoId },
       data: { saldo: { decrement: totalUsd } },
@@ -164,7 +151,7 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     },
   });
 
-  // Notificar fiado al representante (fire-and-forget; usa conexión de sistema, no esta transacción)
+  // Notificar fiado al representante si aplica
   if (body.metodoPago === "fiado" && body.alumnoId) {
     const al = await db.alumno.findUnique({ where: { id: body.alumnoId }, select: { nombre: true } });
     if (al) notificarFiadoRegistrado(body.alumnoId, al.nombre).catch(() => {});

@@ -23,14 +23,16 @@ export const GET = withAuth(async (req: NextRequest, session, { params }: Ctx) =
 
   const { searchParams } = new URL(req.url);
   const pagina = Math.max(1, parseInt(searchParams.get("pagina") ?? "1") || 1);
-  const porPagina = 20;
+  const porPagina = 25;
 
   const ventas = await db.venta.findMany({
     where: { alumnoId: id, deletedAt: null },
     select: {
       id: true, totalUsd: true, totalBs: true, tasaBcv: true, metodoPago: true, esFiado: true, createdAt: true,
+      vendedor: { select: { nombre: true } },
       detalles: {
         select: {
+          id: true,
           cantidad: true, precioUsdUnitario: true,
           producto: { select: { nombre: true } },
         },

@@ -13,74 +13,89 @@ import { guardarArchivo, tipoImagen } from "@/lib/storage";
 const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 
 const abonoSchema = z.object({
-  alumnoId:   z.string().min(1),
-  montoUsd:   z.number().positive(),
-  metodo:     z.enum(["efectivo_usd", "efectivo_bs", "pago_movil", "transferencia"]),
-  referencia: z.string().max(100).optional(),
-  banco:      z.string().max(60).optional(),
+  tipoDistribucion: z.enum(["equitativa", "individual"]).default("equitativa"),
+  alumnoId:         z.string().optional(),
+  montoUsd:         z.number().positive("El monto debe ser mayor a 0"),
+  metodo:           z.enum(["efectivo_usd", "efectivo_bs", "pago_movil", "transferencia"]),
+  referencia:       z.string().max(100).optional(),
+  banco:            z.string().max(60).optional(),
+}).refine((data) => {
+  if (data.metodo === "pago_movil" || data.metodo === "transferencia") {
+    return Boolean(data.referencia && data.referencia.trim().length >= 4);
+  }
+  return true;
+}, {
+  message: "La referencia de pago es requerida para Pago Móvil o Transferencia",
+  path: ["referencia"],
 });
 
 // POST /api/representante/abonos — representante reporta un abono
-// Solo puede reportar para sus propios hijos (§3.4)
 export const POST = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "representante");
 
   const representanteId = session.user.id;
   const contentType     = req.headers.get("content-type") ?? "";
 
-  let alumnoId: string, montoUsd: number, metodo: z.infer<typeof abonoSchema>["metodo"];
-  let referencia: string | undefined, banco: string | undefined;
+  let body: z.infer<typeof abonoSchema>;
   let comprobanteFile: File | null = null;
 
   if (contentType.includes("multipart/form-data")) {
     const form = await req.formData();
-    const parsed = await validateBody(
+    const rawData = {
+      tipoDistribucion: form.get("tipoDistribucion") || "equitativa",
+      alumnoId:         form.get("alumnoId") || undefined,
+      montoUsd:         Number(form.get("montoUsd")),
+      metodo:           form.get("metodo"),
+      referencia:       form.get("referencia") || undefined,
+      banco:            form.get("banco") || undefined,
+    };
+    body = await validateBody(
       new Request(req.url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          alumnoId:   form.get("alumnoId"),
-          montoUsd:   Number(form.get("montoUsd")),
-          metodo:     form.get("metodo"),
-          referencia: form.get("referencia") || undefined,
-          banco:      form.get("banco") || undefined,
-        }),
+        body: JSON.stringify(rawData),
       }),
       abonoSchema
     );
-    alumnoId   = parsed.alumnoId;
-    montoUsd   = parsed.montoUsd;
-    metodo     = parsed.metodo;
-    referencia = parsed.referencia;
-    banco      = parsed.banco;
     const archivo = form.get("comprobante");
     comprobanteFile = archivo instanceof File && archivo.size > 0 ? archivo : null;
   } else {
-    const parsed = await validateBody(req, abonoSchema);
-    alumnoId   = parsed.alumnoId;
-    montoUsd   = parsed.montoUsd;
-    metodo     = parsed.metodo;
-    referencia = parsed.referencia;
-    banco      = parsed.banco;
+    body = await validateBody(req, abonoSchema);
   }
 
-  // Verificar que el alumno es hijo del representante (§3.4)
-  const alumno = await db.alumno.findFirst({
-    where: { id: alumnoId, representanteId, deletedAt: null },
-    select: { id: true, cantinaId: true, cuenta: { select: { id: true } } },
+  // Obtener los hijos del representante
+  const hijos = await db.alumno.findMany({
+    where: { representanteId, deletedAt: null },
+    select: {
+      id: true,
+      nombre: true,
+      cantinaId: true,
+      cuenta: { select: { id: true } },
+    },
   });
 
-  if (!alumno) {
-    return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+  if (!hijos || hijos.length === 0) {
+    return NextResponse.json({ error: "No tienes alumnos registrados a tu cargo" }, { status: 400 });
   }
 
-  if (!alumno.cuenta) {
-    return NextResponse.json({ error: "El alumno no tiene cuenta" }, { status: 400 });
+  let alumnosDestino: typeof hijos = [];
+  if (body.tipoDistribucion === "individual" && body.alumnoId) {
+    const found = hijos.find((h) => h.id === body.alumnoId);
+    if (!found) {
+      return NextResponse.json({ error: "El alumno seleccionado no pertenece a tu cuenta" }, { status: 403 });
+    }
+    alumnosDestino = [found];
+  } else {
+    alumnosDestino = hijos;
   }
 
-  // Subir comprobante si existe (el tipo se valida por los bytes, no por el MIME declarado)
+  const cantinaId = hijos[0].cantinaId;
+  const tasaInfo  = await tasaActivaBcv(cantinaId);
+  const tasa      = tasaInfo?.tasa ?? 1;
+
+  // Subir comprobante si aplica
   let comprobanteUrl: string | null = null;
-  if (comprobanteFile) {
+  if (comprobanteFile && (body.metodo === "pago_movil" || body.metodo === "transferencia")) {
     if (comprobanteFile.size > MAX_SIZE) {
       return NextResponse.json({ error: "El comprobante supera los 5 MB" }, { status: 400 });
     }
@@ -90,49 +105,65 @@ export const POST = withAuth(async (req: NextRequest, session) => {
       return NextResponse.json({ error: "Solo se permiten imágenes JPG, PNG o WebP" }, { status: 400 });
     }
 
-    const clave = `${alumno.cantinaId}/${alumnoId}_${Date.now()}.${tipo.ext}`;
+    const clave = `${cantinaId}/${representanteId}_${Date.now()}.${tipo.ext}`;
     try {
       await guardarArchivo("comprobantes-abonos", clave, bytes);
       comprobanteUrl = clave;
     } catch (err) {
-      console.error("[abonos] comprobante:", err instanceof Error ? err.message : "error");
+      console.error("[abonos] error guardando archivo:", err);
     }
   }
 
-  const cantinaId = alumno.cantinaId;
-  const tasaInfo  = await tasaActivaBcv(cantinaId);
+  const montoPorAlumno = +(body.montoUsd / alumnosDestino.length).toFixed(4);
+  const esEfectivo = body.metodo === "efectivo_usd" || body.metodo === "efectivo_bs";
+  const refFinal = esEfectivo ? null : body.referencia ? encrypt(body.referencia) : null;
+  const montoDec = new Prisma.Decimal(montoPorAlumno);
 
-  const referenciaEncriptada = referencia ? encrypt(referencia) : null;
-  const monto = new Prisma.Decimal(montoUsd);
+  const abonosCreadosIds: string[] = [];
 
-  const abono = await db.abono.create({
-    data: {
-      cuentaAlumnoId:       alumno.cuenta.id,
-      montoUsd:             monto,
-      montoBs:              tasaInfo ? monto.times(tasaInfo.tasa) : null,
-      tasaBcv:              tasaInfo?.tasa ?? null,
-      metodo,
-      referenciaEncriptada,
-      banco:                banco ?? null,
-      comprobanteUrl,
-      estado:               "pendiente",
-    },
-    select: { id: true },
-  });
+  for (const hijo of alumnosDestino) {
+    if (!hijo.cuenta) continue;
+
+    const abono = await db.abono.create({
+      data: {
+        cuentaAlumnoId:       hijo.cuenta.id,
+        montoUsd:             montoDec,
+        montoBs:              tasaInfo ? montoDec.times(tasa) : null,
+        tasaBcv:              tasa,
+        metodo:               body.metodo,
+        referenciaEncriptada: refFinal,
+        banco:                esEfectivo ? null : body.banco ?? null,
+        comprobanteUrl,
+        estado:               "pendiente",
+      },
+      select: { id: true },
+    });
+
+    abonosCreadosIds.push(abono.id);
+  }
 
   await audit({
     usuarioId: representanteId,
     cantinaId,
     evento:    AuditEvent.ABONO_CREADO,
     entidad:   "abonos",
-    entidadId: abono.id,
-    datos:     { alumnoId, montoUsd, metodo, tieneComprobante: !!comprobanteUrl },
+    entidadId: abonosCreadosIds[0] ?? "familiar",
+    datos: {
+      montoTotalUsd:    body.montoUsd,
+      distribucion:     body.tipoDistribucion,
+      alumnosCantidad:  alumnosDestino.length,
+      metodo:           body.metodo,
+    },
   });
 
-  return NextResponse.json({ id: abono.id }, { status: 201 });
+  return NextResponse.json({
+    ok: true,
+    abonosCount: abonosCreadosIds.length,
+    montoPorHijo: montoPorAlumno,
+  }, { status: 201 });
 });
 
-// GET /api/representante/abonos?alumnoId=... — historial de abonos de un hijo
+// GET /api/representante/abonos — historial de abonos
 export const GET = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "representante");
 
@@ -140,22 +171,21 @@ export const GET = withAuth(async (req: NextRequest, session) => {
   const { searchParams } = new URL(req.url);
   const alumnoId = searchParams.get("alumnoId");
 
-  if (!alumnoId) return NextResponse.json([], { status: 200 });
-
-  // Verificar propiedad
-  const alumno = await db.alumno.findFirst({
-    where: { id: alumnoId, representanteId, deletedAt: null },
+  const hijos = await db.alumno.findMany({
+    where: {
+      representanteId,
+      ...(alumnoId ? { id: alumnoId } : {}),
+      deletedAt: null,
+    },
     select: { cuenta: { select: { id: true } } },
   });
 
-  if (!alumno) {
-    return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
-  }
+  const cuentaIds = hijos.map((h) => h.cuenta?.id).filter((id): id is string => Boolean(id));
 
-  if (!alumno.cuenta) return NextResponse.json([]);
+  if (cuentaIds.length === 0) return NextResponse.json([]);
 
   const data = await db.abono.findMany({
-    where: { cuentaAlumnoId: alumno.cuenta.id, deletedAt: null },
+    where: { cuentaAlumnoId: { in: cuentaIds }, deletedAt: null },
     select: {
       id: true, montoUsd: true, montoBs: true, metodo: true, banco: true, estado: true,
       createdAt: true, confirmadoAt: true, motivoRechazo: true,

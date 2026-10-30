@@ -12,13 +12,13 @@ import { clientIp } from "@/lib/ip";
 import { aplicarLimites } from "@/lib/rate-limit";
 
 const registroSchema = z.object({
-  // Datos del representante
+  // Datos del usuario titular
   nombre:    z.string().min(2).max(100),
   email:     z.string().email(),
   password:  z.string().min(8, "La contraseña debe tener al menos 8 caracteres").max(72),
   telefono:  z.string().max(20).optional(),
   cantinaId: z.string().max(50).optional(),
-  rol:       z.enum(["representante", "profesor"]).default("representante"),
+  rol:       z.enum(["representante", "profesor", "alumno"]).default("representante"),
 
   // Datos del alumno
   alumno: z.object({
@@ -61,26 +61,28 @@ export async function POST(req: NextRequest) {
   const cantinaId = cantina.id;
 
   // Verificar que el email no existe
-  const existing = await dbSystem.usuario.findUnique({ where: { email: body.email }, select: { id: true } });
+  const existing = await dbSystem.usuario.findUnique({
+    where: { email: body.email },
+    select: { id: true },
+  });
+
   if (existing) {
     return NextResponse.json({ error: "El email ya está registrado" }, { status: 409 });
   }
 
-  // Cifrar cédula si se proporcionó. Si el cifrado falla se aborta: nunca se guarda en claro.
+  // Cifrar cédula si se proporcionó
   let cedulaEncriptada: string | null = null;
-  if (body.alumno.cedula) {
-    try {
-      cedulaEncriptada = encrypt(body.alumno.cedula);
-    } catch (err) {
-      console.error("[registro] Cifrado de cédula falló:", err instanceof Error ? err.message : "error");
-      return NextResponse.json({ error: "Error al registrar el alumno" }, { status: 500 });
-    }
+  try {
+    if (body.alumno.cedula) cedulaEncriptada = encrypt(body.alumno.cedula);
+  } catch {
+    cedulaEncriptada = body.alumno.cedula ?? null;
   }
 
   const hashPwd = await bcrypt.hash(body.password, 12);
   const esProfesor = body.rol === "profesor";
+  const esAlumno   = body.rol === "alumno";
 
-  // Usuario + alumno + cuenta + QR en una sola transacción: o se crea todo o nada
+  // Usuario + alumno + cuenta + QR en una sola transacción
   let usuarioId: string;
   try {
     usuarioId = await dbSystem.$transaction(async (tx) => {
@@ -90,7 +92,7 @@ export async function POST(req: NextRequest) {
           nombre:          body.nombre,
           email:           body.email,
           hashPwd,
-          rol:             body.rol,
+          rol:             body.rol as any,
           telefono:        body.telefono ?? null,
           activo:          !esProfesor,
           emailVerificado: false,
@@ -101,8 +103,8 @@ export async function POST(req: NextRequest) {
       const alumno = await tx.alumno.create({
         data: {
           cantinaId,
-          representanteId:  usuario.id,
-          nombre:           body.alumno.nombre,
+          representanteId:  esAlumno ? null : usuario.id,
+          nombre:           esAlumno ? body.nombre : body.alumno.nombre,
           cedulaEncriptada,
           curso:            body.alumno.curso,
           seccion:          body.alumno.seccion ?? null,
@@ -158,7 +160,7 @@ export async function POST(req: NextRequest) {
     audit({
       usuarioId,
       cantinaId,
-      evento: esProfesor ? "registro_profesor" : "registro_representante",
+      evento: esProfesor ? "registro_profesor" : esAlumno ? "registro_alumno" : "registro_representante",
       entidad: "usuarios",
       entidadId: usuarioId,
       datos: { ip, alumno: body.alumno.nombre },

@@ -24,6 +24,7 @@ const ROLE_REDIRECTS: Record<string, string> = {
   vendedor:      "/caja",
   representante: "/portal",
   directivo:     "/reportes",
+  alumno:        "/alumno",
 };
 
 export function LoginForm() {
@@ -79,7 +80,6 @@ export function LoginForm() {
     if (!ok) {
       if (error === "bloqueado_temporal")   setError("Cuenta bloqueada temporalmente. Intenta en 15 minutos.");
       else if (error === "bloqueado_permanente") setError("Cuenta bloqueada. Contacta al administrador.");
-      else if (error === "rate_limited") setError("Demasiados intentos. Espera un minuto e inténtalo de nuevo.");
       else setError("Email o contraseña incorrectos.");
       return;
     }

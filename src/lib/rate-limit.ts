@@ -40,7 +40,7 @@ function redis(): Redis {
       maxRetriesPerRequest: 1,
       lazyConnect: false,
     });
-    cliente.on("error", (e) => console.error("[redis]", e.message));
+    cliente.on("error", (e: Error) => console.error("[redis]", e.message));
     g.__cantinappRedis = cliente;
   }
   return g.__cantinappRedis;

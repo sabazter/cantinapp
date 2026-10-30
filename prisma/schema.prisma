@@ -44,6 +44,7 @@ enum Rol {
   directivo
   superadmin
   profesor
+  alumno
 }
 
 model Usuario {
@@ -76,6 +77,20 @@ model Usuario {
   @@map("usuarios")
 }
 
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  usuarioId String   @map("usuario_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@map("password_reset_tokens")
+}
+
 // ─────────────────────────────────────────────
 // Seguridad — Auth
 // ─────────────────────────────────────────────
@@ -94,20 +109,6 @@ model RefreshToken {
 
   @@index([usuarioId])
   @@map("refresh_tokens")
-}
-
-model PasswordResetToken {
-  id         String    @id @default(cuid())
-  usuarioId  String    @map("usuario_id")
-  tokenHash  String    @unique @map("token_hash")
-  expiresAt  DateTime  @map("expires_at")
-  usedAt     DateTime? @map("used_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-
-  usuario    Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-
-  @@index([usuarioId])
-  @@map("password_reset_tokens")
 }
 
 model LoginIntento {
@@ -203,21 +204,21 @@ enum CategoriaProducto {
 }
 
 model Producto {
-  id          String             @id @default(cuid())
-  cantinaId   String             @map("cantina_id")
-  nombre      String
-  categoria   CategoriaProducto  @default(tienda)
-  precioUsd   Decimal            @map("precio_usd") @db.Decimal(10, 4)
-  precioJornadaUsd Decimal?          @map("precio_jornada_usd") @db.Decimal(10, 4)
-  stock       Int                @default(0)
-  stockMin    Int                @default(5) @map("stock_min")
-  activo      Boolean            @default(true)
-  createdAt   DateTime           @default(now()) @map("created_at")
-  updatedAt   DateTime           @updatedAt @map("updated_at")
+  id               String             @id @default(cuid())
+  cantinaId        String             @map("cantina_id")
+  nombre           String
+  categoria        CategoriaProducto  @default(tienda)
+  precioUsd        Decimal            @map("precio_usd") @db.Decimal(10, 4)
+  precioJornadaUsd Decimal?           @map("precio_jornada_usd") @db.Decimal(10, 4)
+  stock            Int                @default(0)
+  stockMin         Int                @default(5) @map("stock_min")
+  activo           Boolean            @default(true)
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
 
-  cantina     Cantina            @relation(fields: [cantinaId], references: [id])
-  detalles    DetalleVenta[]
-  movimientos MovimientoInventario[]
+  cantina          Cantina            @relation(fields: [cantinaId], references: [id])
+  detalles         DetalleVenta[]
+  movimientos      MovimientoInventario[]
 
   @@index([cantinaId])
   @@map("productos")
@@ -303,7 +304,6 @@ model Venta {
 
   @@index([cantinaId, createdAt])
   @@index([alumnoId])
-  @@index([vendedorId])
   @@map("ventas")
 }
 
@@ -361,7 +361,6 @@ model Abono {
   admin           Usuario?     @relation("AdminAbonos", fields: [confirmadoPor], references: [id])
 
   @@index([cuentaAlumnoId])
-  @@index([estado])
   @@map("abonos")
 }
 
