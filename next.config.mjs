@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  outputFileTracingIncludes: {
+    "/*": ["./src/generated/**/*", "./prisma/**/*"],
+  },
   headers: async () => [
     {
       // Service worker sin caché para que se actualice inmediatamente
