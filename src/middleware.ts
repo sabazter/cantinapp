@@ -8,6 +8,7 @@ const ROLE_REDIRECTS: Record<string, string> = {
   representante: "/portal",
   directivo:     "/reportes",
   superadmin:    "/superadmin/dashboard",
+  alumno:        "/alumno",
 };
 
 const PROTECTED_PREFIXES: Record<string, string[]> = {
@@ -16,6 +17,7 @@ const PROTECTED_PREFIXES: Record<string, string[]> = {
   "/portal":     ["representante", "profesor"],
   "/reportes":   ["directivo", "admin", "superadmin"],
   "/superadmin": ["superadmin"],
+  "/alumno":     ["alumno"],
 };
 
 let _cachedPublicKey: Awaited<ReturnType<typeof importSPKI>> | null = null;

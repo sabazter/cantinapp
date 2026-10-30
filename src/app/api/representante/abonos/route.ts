@@ -11,80 +11,89 @@ const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 const abonoSchema = z.object({
-  alumnoId:   z.string().min(1),
-  montoUsd:   z.number().positive(),
-  metodo:     z.enum(["efectivo_usd", "efectivo_bs", "pago_movil", "transferencia"]),
-  referencia: z.string().max(100).optional(),
-  banco:      z.string().max(60).optional(),
+  tipoDistribucion: z.enum(["equitativa", "individual"]).default("equitativa"),
+  alumnoId:         z.string().optional(),
+  montoUsd:         z.number().positive("El monto debe ser mayor a 0"),
+  metodo:           z.enum(["efectivo_usd", "efectivo_bs", "pago_movil", "transferencia"]),
+  referencia:       z.string().max(100).optional(),
+  banco:            z.string().max(60).optional(),
+}).refine((data) => {
+  // Referencia obligatoria solo si es pago móvil o transferencia
+  if (data.metodo === "pago_movil" || data.metodo === "transferencia") {
+    return Boolean(data.referencia && data.referencia.trim().length >= 4);
+  }
+  return true;
+}, {
+  message: "La referencia de pago es requerida para Pago Móvil o Transferencia",
+  path: ["referencia"],
 });
 
 // POST /api/representante/abonos — representante reporta un abono
-// Solo puede reportar para sus propios hijos (§3.4)
 export const POST = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "representante");
 
   const representanteId = session.user.id;
   const contentType     = req.headers.get("content-type") ?? "";
 
-  let alumnoId: string, montoUsd: number, metodo: string, referencia: string | undefined, banco: string | undefined;
+  let body: z.infer<typeof abonoSchema>;
   let comprobanteFile: File | null = null;
 
   if (contentType.includes("multipart/form-data")) {
     const form = await req.formData();
-    const parsed = await validateBody(
+    const rawData = {
+      tipoDistribucion: form.get("tipoDistribucion") || "equitativa",
+      alumnoId:         form.get("alumnoId") || undefined,
+      montoUsd:         Number(form.get("montoUsd")),
+      metodo:           form.get("metodo"),
+      referencia:       form.get("referencia") || undefined,
+      banco:            form.get("banco") || undefined,
+    };
+    body = await validateBody(
       new Request(req.url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          alumnoId:   form.get("alumnoId"),
-          montoUsd:   Number(form.get("montoUsd")),
-          metodo:     form.get("metodo"),
-          referencia: form.get("referencia") || undefined,
-          banco:      form.get("banco") || undefined,
-        }),
+        body: JSON.stringify(rawData),
       }),
       abonoSchema
     );
-    alumnoId   = parsed.alumnoId;
-    montoUsd   = parsed.montoUsd;
-    metodo     = parsed.metodo;
-    referencia = parsed.referencia;
-    banco      = parsed.banco;
     comprobanteFile = form.get("comprobante") as File | null;
   } else {
-    const parsed = await validateBody(req, abonoSchema);
-    alumnoId   = parsed.alumnoId;
-    montoUsd   = parsed.montoUsd;
-    metodo     = parsed.metodo;
-    referencia = parsed.referencia;
-    banco      = parsed.banco;
+    body = await validateBody(req, abonoSchema);
   }
 
   const supabase = createServerSupabase();
 
-  // Verificar que el alumno es hijo del representante (§3.4)
-  const { data: alumno } = await supabase
+  // Obtener los hijos del representante
+  const { data: hijos } = await supabase
     .from("alumnos")
-    .select("id, representante_id, cantina_id, cuentas_alumnos(id)")
-    .eq("id", alumnoId)
-    .is("deleted_at", null)
-    .single();
+    .select("id, nombre, cantina_id, cuentas_alumnos(id)")
+    .eq("representante_id", representanteId)
+    .is("deleted_at", null);
 
-  if (!alumno || alumno.representante_id !== representanteId) {
-    return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+  if (!hijos || hijos.length === 0) {
+    return NextResponse.json({ error: "No tienes alumnos registrados a tu cargo" }, { status: 400 });
   }
 
-  const cuentaAlumnoId = Array.isArray(alumno.cuentas_alumnos)
-    ? (alumno.cuentas_alumnos as { id: string }[])[0]?.id
-    : (alumno.cuentas_alumnos as { id: string } | null)?.id;
-
-  if (!cuentaAlumnoId) {
-    return NextResponse.json({ error: "El alumno no tiene cuenta" }, { status: 400 });
+  // Determinar cuentas de destino
+  let alumnosDestino: typeof hijos = [];
+  if (body.tipoDistribucion === "individual" && body.alumnoId) {
+    const found = hijos.find((h) => h.id === body.alumnoId);
+    if (!found) {
+      return NextResponse.json({ error: "El alumno seleccionado no pertenece a tu cuenta" }, { status: 403 });
+    }
+    alumnosDestino = [found];
+  } else {
+    // Por defecto: distribución equitativa entre todos los hijos
+    alumnosDestino = hijos;
   }
 
-  // Subir comprobante si existe
+  const cantinaId = hijos[0].cantina_id;
+  const tasaInfo  = await tasaActivaBcv(cantinaId);
+  const tasa      = tasaInfo?.tasa ?? 1;
+
+  // Subir comprobante si aplica
   let comprobanteUrl: string | null = null;
-  if (comprobanteFile) {
+  if (comprobanteFile && (body.metodo === "pago_movil" || body.metodo === "transferencia")) {
     if (!ALLOWED_TYPES.includes(comprobanteFile.type)) {
       return NextResponse.json({ error: "Solo se permiten imágenes JPG, PNG o WebP" }, { status: 400 });
     }
@@ -93,7 +102,7 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     }
 
     const ext  = comprobanteFile.type.split("/")[1];
-    const path = `${alumno.cantina_id}/${alumnoId}_${Date.now()}.${ext}`;
+    const path = `${cantinaId}/${representanteId}_${Date.now()}.${ext}`;
     const ab   = await comprobanteFile.arrayBuffer();
 
     const { error: uploadErr } = await supabase.storage
@@ -103,43 +112,63 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     if (!uploadErr) comprobanteUrl = path;
   }
 
-  const cantinaId = alumno.cantina_id;
-  const tasaInfo  = await tasaActivaBcv(cantinaId);
+  const montoPorAlumno = +(body.montoUsd / alumnosDestino.length).toFixed(4);
+  const montoBsPorAlumno = +(montoPorAlumno * tasa).toFixed(4);
+  const esEfectivo = body.metodo === "efectivo_usd" || body.metodo === "efectivo_bs";
+  const refFinal = esEfectivo ? null : body.referencia ? encrypt(body.referencia) : null;
 
-  const referenciaEncriptada = referencia ? encrypt(referencia) : null;
-  const montoBs = tasaInfo ? montoUsd * tasaInfo.tasa : null;
+  const abonosCreadosIds: string[] = [];
 
-  const { data: abono, error: abonoErr } = await supabase
-    .from("abonos")
-    .insert({
-      cuenta_alumno_id:      cuentaAlumnoId,
-      monto_usd:             montoUsd,
-      monto_bs:              montoBs,
-      tasa_bcv:              tasaInfo?.tasa ?? null,
-      metodo,
-      referencia_encriptada: referenciaEncriptada,
-      banco:                 banco ?? null,
-      comprobante_url:       comprobanteUrl,
-      estado:                "pendiente",
-    })
-    .select("id")
-    .single();
+  for (const hijo of alumnosDestino) {
+    const cuentaId = Array.isArray(hijo.cuentas_alumnos)
+      ? hijo.cuentas_alumnos[0]?.id
+      : (hijo.cuentas_alumnos as any)?.id;
 
-  if (abonoErr || !abono) throw abonoErr ?? new Error("Error insertando abono");
+    if (!cuentaId) continue;
+
+    const { data: abono, error: abonoErr } = await supabase
+      .from("abonos")
+      .insert({
+        cuenta_alumno_id:      cuentaId,
+        monto_usd:             montoPorAlumno,
+        monto_bs:              montoBsPorAlumno,
+        tasa_bcv:              tasa,
+        metodo:                body.metodo,
+        referencia_encriptada: refFinal,
+        banco:                 esEfectivo ? null : body.banco ?? null,
+        comprobante_url:       comprobanteUrl,
+        estado:                "pendiente",
+      })
+      .select("id")
+      .single();
+
+    if (abono && !abonoErr) {
+      abonosCreadosIds.push(abono.id);
+    }
+  }
 
   await audit({
     usuarioId: representanteId,
     cantinaId,
     evento:    AuditEvent.ABONO_CREADO,
     entidad:   "abonos",
-    entidadId: abono.id,
-    datos:     { alumnoId, montoUsd, metodo, tieneComprobante: !!comprobanteUrl },
+    entidadId: abonosCreadosIds[0] ?? "familiar",
+    datos: {
+      montoTotalUsd:    body.montoUsd,
+      distribucion:     body.tipoDistribucion,
+      alumnosCantidad:  alumnosDestino.length,
+      metodo:           body.metodo,
+    },
   });
 
-  return NextResponse.json({ id: abono.id }, { status: 201 });
+  return NextResponse.json({
+    ok: true,
+    abonosCount: abonosCreadosIds.length,
+    montoPorHijo: montoPorAlumno,
+  }, { status: 201 });
 });
 
-// GET /api/representante/abonos?alumnoId=... — historial de abonos de un hijo
+// GET /api/representante/abonos — historial consolidado de abonos del representante
 export const GET = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "representante");
 
@@ -147,35 +176,45 @@ export const GET = withAuth(async (req: NextRequest, session) => {
   const { searchParams } = new URL(req.url);
   const alumnoId = searchParams.get("alumnoId");
 
-  if (!alumnoId) return NextResponse.json([], { status: 200 });
-
   const supabase = createServerSupabase();
 
-  // Verificar propiedad
-  const { data: alumno } = await supabase
+  // Obtener los hijos del representante
+  let query = supabase
     .from("alumnos")
-    .select("representante_id, cuentas_alumnos(id)")
-    .eq("id", alumnoId)
-    .is("deleted_at", null)
-    .single();
+    .select("id, nombre, cuentas_alumnos(id)")
+    .eq("representante_id", representanteId)
+    .is("deleted_at", null);
 
-  if (!alumno || alumno.representante_id !== representanteId) {
-    return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+  if (alumnoId) {
+    query = query.eq("id", alumnoId);
   }
 
-  const cuentaAlumnoId = Array.isArray(alumno.cuentas_alumnos)
-    ? (alumno.cuentas_alumnos as { id: string }[])[0]?.id
-    : (alumno.cuentas_alumnos as { id: string } | null)?.id;
+  const { data: hijos } = await query;
+  if (!hijos || hijos.length === 0) return NextResponse.json([]);
 
-  if (!cuentaAlumnoId) return NextResponse.json([]);
+  const cuentaIds = hijos
+    .map((h) => {
+      const c = Array.isArray(h.cuentas_alumnos) ? h.cuentas_alumnos[0] : (h.cuentas_alumnos as any);
+      return c?.id;
+    })
+    .filter(Boolean);
 
-  const { data } = await supabase
+  if (cuentaIds.length === 0) return NextResponse.json([]);
+
+  const { data: abonos } = await supabase
     .from("abonos")
-    .select("id, monto_usd, monto_bs, metodo, banco, estado, created_at, confirmado_at, motivo_rechazo")
-    .eq("cuenta_alumno_id", cuentaAlumnoId)
+    .select(`
+      id, monto_usd, monto_bs, metodo, banco, estado, created_at, confirmado_at, motivo_rechazo,
+      cuentas_alumnos (
+        alumno:alumnos (
+          id, nombre
+        )
+      )
+    `)
+    .in("cuenta_alumno_id", cuentaIds)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(50);
 
-  return NextResponse.json(data ?? []);
+  return NextResponse.json(abonos ?? []);
 });

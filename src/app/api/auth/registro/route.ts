@@ -10,13 +10,13 @@ import { emailBienvenidaRepresentante, emailNuevoRegistroAdmin, emailBienvenidaP
 import { audit } from "@/lib/audit";
 
 const registroSchema = z.object({
-  // Datos del representante
+  // Datos del titular / usuario
   nombre:    z.string().min(2).max(100),
   email:     z.string().email(),
   password:  z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
   telefono:  z.string().max(20).optional(),
   cantinaId: z.string().optional(),
-  rol:       z.enum(["representante", "profesor"]).default("representante"),
+  rol:       z.enum(["representante", "profesor", "alumno"]).default("representante"),
 
   // Datos del alumno
   alumno: z.object({
@@ -110,12 +110,14 @@ export async function POST(req: NextRequest) {
   }
 
   // Crear alumno
+  const esAlumno = body.rol === "alumno";
   const { data: alumno, error: alumnoErr } = await supabase
     .from("alumnos")
     .insert({
       cantina_id:        cantinaId,
-      representante_id:  usuario.id,
-      nombre:            body.alumno.nombre,
+      representante_id:  esAlumno ? null : usuario.id,
+      usuario_id:        esAlumno ? usuario.id : null,
+      nombre:            esAlumno ? body.nombre : body.alumno.nombre,
       cedula_encriptada: cedulaEncriptada,
       curso:             body.alumno.curso,
       seccion:           body.alumno.seccion ?? null,

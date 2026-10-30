@@ -19,7 +19,7 @@ async function verificarHijo(representanteId: string, alumnoId: string) {
   return data;
 }
 
-// GET /api/representante/alumnos/[id] — detalle + historial de compras
+// GET /api/representante/alumnos/[id] — detalle + historial detallado de compras
 export const GET = withAuth(async (req: NextRequest, session, { params }: Ctx) => {
   requireRole(session, "representante");
   const { id } = await params;
@@ -30,13 +30,13 @@ export const GET = withAuth(async (req: NextRequest, session, { params }: Ctx) =
   const supabase = createServerSupabase();
   const { searchParams } = new URL(req.url);
   const pagina = parseInt(searchParams.get("pagina") ?? "1");
-  const porPagina = 20;
+  const porPagina = 25;
   const offset = (pagina - 1) * porPagina;
 
   const [alumnoRes, ventasRes] = await Promise.all([
     supabase
       .from("alumnos")
-      .select("id, nombre, curso, seccion, activo, cuentas_alumnos(saldo)")
+      .select("id, nombre, curso, seccion, activo, cantina_id, qr_code, fiado_habilitado, limite_fiado_usd, cuentas_alumnos(saldo)")
       .eq("id", id)
       .single(),
 
@@ -44,7 +44,19 @@ export const GET = withAuth(async (req: NextRequest, session, { params }: Ctx) =
       .from("ventas")
       .select(`
         id, total_usd, total_bs, tasa_bcv, metodo_pago, es_fiado, created_at,
-        detalle_ventas ( cantidad, precio_usd_unitario, productos ( nombre ) )
+        vendedor:usuarios!ventas_vendedor_id_fkey (
+          id,
+          nombre
+        ),
+        detalle_ventas (
+          id,
+          cantidad,
+          precio_usd_unitario,
+          productos (
+            id,
+            nombre
+          )
+        )
       `)
       .eq("alumno_id", id)
       .is("deleted_at", null)

@@ -1,325 +1,168 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { toast } from "sonner";
+import {
+  Wallet, Plus, QrCode, ShoppingBag, Clock, User,
+  ChevronDown, ChevronUp, AlertCircle, CheckCircle2,
+  Users, CreditCard, Loader2, ArrowRight,
+} from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  GraduationCap, Wallet, ShoppingBag, Plus, CheckCircle2, XCircle, Clock,
-  Settings, MailCheck, MailX, Bell, BellOff, Trash2,
-} from "lucide-react";
+import { QrCarnetCard } from "@/components/shared/qr-carnet-card";
 
 interface Alumno {
   id: string;
   nombre: string;
   curso: string;
   seccion: string | null;
-  activo: boolean;
-  cuentas_alumnos: { saldo: string } | null;
+  cuentas_alumnos: { saldo: string } | null | { saldo: string }[];
+}
+
+interface DetalleVentaItem {
+  id: string;
+  cantidad: number;
+  precio_usd_unitario: number;
+  productos: { nombre: string } | null;
 }
 
 interface Venta {
   id: string;
-  total_usd: string;
-  total_bs: string;
+  total_usd: number;
+  total_bs: number;
+  tasa_bcv: number;
   metodo_pago: string;
   es_fiado: boolean;
   created_at: string;
-  detalle_ventas: {
-    cantidad: number;
-    precio_usd_unitario: string;
-    productos: { nombre: string } | null;
-  }[];
+  vendedor: { nombre: string } | null;
+  detalle_ventas: DetalleVentaItem[];
 }
-
-interface Abono {
-  id: string;
-  monto_usd: string;
-  monto_bs: string | null;
-  metodo: string;
-  banco: string | null;
-  estado: "pendiente" | "confirmado" | "rechazado";
-  created_at: string;
-  confirmado_at: string | null;
-  motivo_rechazo: string | null;
-}
-
-const abonoSchema = z.object({
-  montoUsd:   z.number().positive("Ingrese un monto válido"),
-  metodo:     z.enum(["efectivo_usd", "efectivo_bs", "pago_movil", "transferencia"]),
-  referencia: z.string().max(100).optional(),
-  banco:      z.string().max(60).optional(),
-});
-
-type AbonoForm = z.infer<typeof abonoSchema>;
-
-const METODO_LABEL: Record<string, string> = {
-  efectivo_usd:  "Efectivo USD",
-  efectivo_bs:   "Efectivo Bs",
-  pago_movil:    "Pago Móvil",
-  transferencia: "Transferencia",
-  fiado:         "Fiado",
-};
-
-// ── Tab Configuración ─────────────────────────────────────────────────────────
-
-interface RepConfig {
-  emailVerificado: boolean;
-  notifEmail:      boolean;
-  notifWhatsapp:   boolean;
-}
-
-function TabConfiguracion() {
-  const [config,   setConfig]   = useState<RepConfig | null>(null);
-  const [loading,  setLoading]  = useState(true);
-  const [saving,   setSaving]   = useState(false);
-  const [sending,  setSending]  = useState(false);
-  const [elimMsg,  setElimMsg]  = useState<"idle" | "confirm" | "done">("idle");
-  const [msg,      setMsg]      = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/representante/config")
-      .then(r => r.json())
-      .then(d => { setConfig(d); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
-
-  async function enviarVerificacion() {
-    setSending(true);
-    setMsg(null);
-    const res = await fetch("/api/auth/verificar-email", { method: "POST" });
-    setSending(false);
-    if (res.ok) setMsg("Correo de verificación enviado. Revisa tu bandeja de entrada.");
-    else { const e = await res.json(); setMsg(e.error ?? "Error al enviar"); }
-  }
-
-  async function guardarPrefs(notifEmail: boolean, notifWhatsapp: boolean) {
-    if (!config) return;
-    setSaving(true);
-    setMsg(null);
-    const res = await fetch("/api/representante/config", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notifEmail, notifWhatsapp }),
-    });
-    setSaving(false);
-    if (res.ok) {
-      setConfig({ ...config, notifEmail, notifWhatsapp });
-      setMsg("Preferencias guardadas.");
-    } else {
-      setMsg("Error al guardar.");
-    }
-  }
-
-  async function solicitarEliminacion() {
-    setSaving(true);
-    const res = await fetch("/api/representante/solicitar-eliminacion", { method: "POST" });
-    setSaving(false);
-    if (res.ok) setElimMsg("done");
-    else setElimMsg("idle");
-  }
-
-  if (loading) return <div className="h-40 animate-pulse rounded-lg bg-muted" />;
-
-  return (
-    <div className="space-y-4">
-      {/* Email verification */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            {config?.emailVerificado
-              ? <MailCheck className="h-4 w-4 text-green-600" />
-              : <MailX className="h-4 w-4 text-amber-500" />}
-            <CardTitle className="text-base">Verificación de correo</CardTitle>
-          </div>
-          <CardDescription>
-            {config?.emailVerificado
-              ? "Tu correo electrónico está verificado."
-              : "Tu correo no ha sido verificado. Verifica para recibir notificaciones."}
-          </CardDescription>
-        </CardHeader>
-        {!config?.emailVerificado && (
-          <CardContent>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={enviarVerificacion}
-              disabled={sending}
-            >
-              {sending ? "Enviando…" : "Enviar correo de verificación"}
-            </Button>
-          </CardContent>
-        )}
-      </Card>
-
-      {/* Notification preferences */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Bell className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-base">Notificaciones</CardTitle>
-          </div>
-          <CardDescription>Elige cómo quieres recibir avisos de la cantina</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {config && (
-            <>
-              <label className="flex items-center justify-between cursor-pointer">
-                <span className="text-sm">Notificaciones por email</span>
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-gray-300 accent-primary"
-                  checked={config.notifEmail}
-                  onChange={e => guardarPrefs(e.target.checked, config.notifWhatsapp)}
-                  disabled={saving}
-                />
-              </label>
-              <label className="flex items-center justify-between cursor-pointer">
-                <span className="text-sm">Notificaciones por WhatsApp</span>
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-gray-300 accent-primary"
-                  checked={config.notifWhatsapp}
-                  onChange={e => guardarPrefs(config.notifEmail, e.target.checked)}
-                  disabled={saving}
-                />
-              </label>
-            </>
-          )}
-          {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
-        </CardContent>
-      </Card>
-
-      {/* Data deletion */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Trash2 className="h-4 w-4 text-destructive" />
-            <CardTitle className="text-base">Eliminación de datos</CardTitle>
-          </div>
-          <CardDescription>
-            Solicita la eliminación de tu cuenta y tus datos personales
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {elimMsg === "done" ? (
-            <div className="flex items-center gap-2 text-sm text-green-700">
-              <CheckCircle2 className="h-4 w-4" />
-              Solicitud enviada. El administrador la procesará en un plazo de 30 días.
-            </div>
-          ) : elimMsg === "confirm" ? (
-            <div className="space-y-3">
-              <p className="text-sm text-destructive">
-                ¿Confirmas que deseas solicitar la eliminación de tu cuenta y datos?
-                Esta acción no se puede deshacer.
-              </p>
-              <div className="flex gap-2">
-                <Button size="sm" variant="destructive" onClick={solicitarEliminacion} disabled={saving}>
-                  {saving ? "Enviando…" : "Sí, solicitar eliminación"}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setElimMsg("idle")}>
-                  Cancelar
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-destructive border-destructive/30 hover:bg-destructive/10"
-              onClick={() => setElimMsg("confirm")}
-            >
-              <Trash2 className="h-3.5 w-3.5 mr-2" />
-              Solicitar eliminación de mis datos
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-// ── Portal principal ──────────────────────────────────────────────────────────
 
 export function PortalClient() {
-  const [hijos, setHijos]         = useState<Alumno[]>([]);
-  const [selectedHijo, setSelectedHijo] = useState<Alumno | null>(null);
-  const [ventas, setVentas]       = useState<Venta[]>([]);
-  const [abonos, setAbonos]       = useState<Abono[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [loadingDetalle, setLoadingDetalle] = useState(false);
-  const [error, setError]         = useState<string | null>(null);
+  const [hijos, setHijos]             = useState<Alumno[]>([]);
+  const [loading, setLoading]         = useState(true);
 
-  const [modalAbono, setModalAbono] = useState(false);
-  const [saving, setSaving]         = useState(false);
-  const [abonoSuccess, setAbonoSuccess] = useState(false);
-  const [actionErr, setActionErr]   = useState<string | null>(null);
-  const comprobanteRef              = useRef<HTMLInputElement>(null);
+  // Modales
+  const [modalAbono, setModalAbono]   = useState(false);
+  const [modalCarnet, setModalCarnet] = useState<Alumno | null>(null);
+  const [modalHijo, setModalHijo]     = useState(false);
 
-  const form = useForm<AbonoForm>({
-    resolver: zodResolver(abonoSchema),
-    defaultValues: { metodo: "transferencia" },
-  });
+  // Historial expandido por hijo
+  const [comprasHijo, setComprasHijo] = useState<Record<string, Venta[]>>({});
+  const [cargandoCompras, setCargandoCompras] = useState<Record<string, boolean>>({});
+  const [hijoExpandido, setHijoExpandido]     = useState<string | null>(null);
+
+  // Formulario de Abono
+  const [montoAbono, setMontoAbono]               = useState("");
+  const [distribucion, setDistribucion]           = useState<"equitativa" | "individual">("equitativa");
+  const [hijoSeleccionadoId, setHijoSeleccionadoId] = useState<string>("");
+  const [metodoPago, setMetodoPago]               = useState<"pago_movil" | "transferencia" | "efectivo_usd" | "efectivo_bs">("pago_movil");
+  const [referencia, setReferencia]               = useState("");
+  const [banco, setBanco]                         = useState("");
+  const [comprobante, setComprobante]             = useState<File | null>(null);
+  const [enviandoAbono, setEnviandoAbono]         = useState(false);
+
+  // Formulario Crear / Vincular Hijo
+  const [modoHijo, setModoHijo]   = useState<"crear" | "vincular">("crear");
+  const [nombreHijo, setNombreHijo] = useState("");
+  const [cursoHijo, setCursoHijo]   = useState("");
+  const [seccionHijo, setSeccionHijo] = useState("");
+  const [cedulaOCodigo, setCedulaOCodigo] = useState("");
+  const [guardandoHijo, setGuardandoHijo] = useState(false);
+
+  // ── Cargar hijos ────────────────────────────────────────────────────────────
+  const cargarHijos = useCallback(async () => {
+    try {
+      const res = await fetch("/api/representante/alumnos");
+      if (res.ok) {
+        const data = await res.json();
+        setHijos(data);
+        if (data.length > 0 && !hijoSeleccionadoId) {
+          setHijoSeleccionadoId(data[0].id);
+        }
+      }
+    } catch {
+      toast.error("Error al cargar alumnos");
+    } finally {
+      setLoading(false);
+    }
+  }, [hijoSeleccionadoId]);
 
   useEffect(() => {
-    fetch("/api/representante/alumnos")
-      .then(r => r.json())
-      .then((data: Alumno[]) => {
-        setHijos(data);
-        if (data.length === 1) cargarDetalle(data[0]);
-      })
-      .catch(() => setError("Error al cargar datos"))
-      .finally(() => setLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    cargarHijos();
+  }, [cargarHijos]);
 
-  async function cargarDetalle(hijo: Alumno) {
-    setSelectedHijo(hijo);
-    setLoadingDetalle(true);
-    try {
-      const [ventasRes, abonosRes] = await Promise.all([
-        fetch(`/api/representante/alumnos/${hijo.id}`).then(r => r.json()),
-        fetch(`/api/representante/abonos?alumnoId=${hijo.id}`).then(r => r.json()),
-      ]);
-      setVentas(ventasRes.ventas ?? []);
-      setAbonos(abonosRes);
-    } catch {
-      setError("Error al cargar historial");
-    } finally {
-      setLoadingDetalle(false);
+  // ── Cargar compras de un hijo al expandir ────────────────────────────────────
+  const toggleVerCompras = async (hijoId: string) => {
+    if (hijoExpandido === hijoId) {
+      setHijoExpandido(null);
+      return;
     }
-  }
 
-  async function onReportarAbono(values: AbonoForm) {
-    if (!selectedHijo) return;
-    setSaving(true);
-    setActionErr(null);
+    setHijoExpandido(hijoId);
 
+    if (!comprasHijo[hijoId]) {
+      setCargandoCompras((prev) => ({ ...prev, [hijoId]: true }));
+      try {
+        const res = await fetch(`/api/representante/alumnos/${hijoId}`);
+        if (res.ok) {
+          const d = await res.json();
+          setComprasHijo((prev) => ({ ...prev, [hijoId]: d.ventas ?? [] }));
+        }
+      } finally {
+        setCargandoCompras((prev) => ({ ...prev, [hijoId]: false }));
+      }
+    }
+  };
+
+  // ── Cálculos de saldo familiar ──────────────────────────────────────────────
+  const getSaldo = (h: Alumno) => {
+    const c = Array.isArray(h.cuentas_alumnos) ? h.cuentas_alumnos[0] : h.cuentas_alumnos;
+    return Number(c?.saldo ?? 0);
+  };
+
+  const saldoFamiliarTotal = useMemo(() => {
+    return hijos.reduce((sum, h) => sum + getSaldo(h), 0);
+  }, [hijos]);
+
+  // ── Enviar Abono ────────────────────────────────────────────────────────────
+  const handleEnviarAbono = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const monto = parseFloat(montoAbono);
+    if (isNaN(monto) || monto <= 0) {
+      toast.error("Ingresa un monto válido");
+      return;
+    }
+
+    const esEfectivo = metodoPago === "efectivo_usd" || metodoPago === "efectivo_bs";
+    if (!esEfectivo && (!referencia || referencia.trim().length < 4)) {
+      toast.error("Ingresa el número de referencia del pago");
+      return;
+    }
+
+    setEnviandoAbono(true);
     try {
       const formData = new FormData();
-      formData.append("alumnoId",  selectedHijo.id);
-      formData.append("montoUsd",  String(values.montoUsd));
-      formData.append("metodo",    values.metodo);
-      if (values.referencia) formData.append("referencia", values.referencia);
-      if (values.banco)      formData.append("banco",      values.banco);
-
-      const file = comprobanteRef.current?.files?.[0];
-      if (file) formData.append("comprobante", file);
+      formData.append("tipoDistribucion", distribucion);
+      if (distribucion === "individual") {
+        formData.append("alumnoId", hijoSeleccionadoId);
+      }
+      formData.append("montoUsd", String(monto));
+      formData.append("metodo", metodoPago);
+      if (!esEfectivo) {
+        if (referencia) formData.append("referencia", referencia.trim());
+        if (banco) formData.append("banco", banco.trim());
+        if (comprobante) formData.append("comprobante", comprobante);
+      }
 
       const res = await fetch("/api/representante/abonos", {
         method: "POST",
@@ -327,350 +170,581 @@ export function PortalClient() {
       });
 
       if (!res.ok) {
-        const e = await res.json();
-        throw new Error(e.error ?? "Error al reportar");
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error ?? "Error al reportar el pago");
       }
 
-      setAbonoSuccess(true);
-      form.reset({ metodo: "transferencia" });
-      if (comprobanteRef.current) comprobanteRef.current.value = "";
-      // Refrescar abonos
-      const abonosRes = await fetch(`/api/representante/abonos?alumnoId=${selectedHijo.id}`);
-      if (abonosRes.ok) setAbonos(await abonosRes.json());
+      toast.success(
+        distribucion === "equitativa" && hijos.length > 1
+          ? "Abono reportado y distribuido equitativamente entre tus hijos. Pendiente de verificación."
+          : "Abono reportado exitosamente. Pendiente de verificación por la cantina."
+      );
+
+      setModalAbono(false);
+      setMontoAbono("");
+      setReferencia("");
+      setBanco("");
+      setComprobante(null);
+      cargarHijos();
     } catch (err) {
-      setActionErr(err instanceof Error ? err.message : "Error inesperado");
+      toast.error((err as Error).message);
     } finally {
-      setSaving(false);
+      setEnviandoAbono(false);
     }
-  }
-
-  const fmtUsd  = (n: string | number) => `$${Number(n).toFixed(2)}`;
-  const fmtBs   = (n: string | number) =>
-    new Intl.NumberFormat("es-VE", { minimumFractionDigits: 2 }).format(Number(n)) + " Bs";
-  const fmtDate = (d: string) =>
-    new Date(d).toLocaleDateString("es-VE", { day: "2-digit", month: "short", year: "numeric" });
-
-  const saldoColor = (saldo: string | undefined) => {
-    const n = Number(saldo ?? 0);
-    return n < 0 ? "text-red-600" : n > 0 ? "text-green-700" : "text-muted-foreground";
   };
 
-  const estadoIcon = (estado: Abono["estado"]) => {
-    if (estado === "confirmado") return <CheckCircle2 className="h-4 w-4 text-green-600" />;
-    if (estado === "rechazado")  return <XCircle className="h-4 w-4 text-destructive" />;
-    return <Clock className="h-4 w-4 text-amber-500" />;
+  // ── Registrar o Vincular Hijo ───────────────────────────────────────────────
+  const handleGuardarHijo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGuardandoHijo(true);
+    try {
+      let payload: any;
+      if (modoHijo === "crear") {
+        if (!nombreHijo || !cursoHijo) {
+          toast.error("Nombre y curso son requeridos");
+          setGuardandoHijo(false);
+          return;
+        }
+        payload = {
+          accion:  "crear",
+          nombre:  nombreHijo.trim(),
+          curso:   cursoHijo.trim(),
+          seccion: seccionHijo.trim() || undefined,
+        };
+      } else {
+        if (!cedulaOCodigo) {
+          toast.error("Ingresa el código o cédula del alumno");
+          setGuardandoHijo(false);
+          return;
+        }
+        payload = {
+          accion:        "vincular",
+          identificador: cedulaOCodigo.trim(),
+        };
+      }
+
+      const res = await fetch("/api/representante/alumnos", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error ?? "No se pudo procesar la solicitud");
+      }
+
+      toast.success(modoHijo === "crear" ? "Hijo registrado exitosamente" : "Cuenta de alumno vinculada");
+      setModalHijo(false);
+      setNombreHijo("");
+      setCursoHijo("");
+      setSeccionHijo("");
+      setCedulaOCodigo("");
+      cargarHijos();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setGuardandoHijo(false);
+    }
   };
 
   if (loading) {
     return (
-      <div className="p-6 space-y-4">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />
-        ))}
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3 text-muted-foreground">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <span className="text-sm font-medium">Cargando información familiar...</span>
       </div>
     );
   }
 
-  if (error) {
-    return (
-      <div className="p-6">
-        <p className="text-destructive">{error}</p>
-      </div>
-    );
-  }
+  const esEfectivo = metodoPago === "efectivo_usd" || metodoPago === "efectivo_bs";
 
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-4xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold">Mi Portal</h1>
-        <p className="text-muted-foreground text-sm">Consulta el saldo y el historial de tus hijos</p>
+    <div className="p-4 sm:p-6 max-w-2xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Portal de la Familia</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            Control de cuentas, saldo y carnets escolares
+          </p>
+        </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setModalHijo(true)}
+          className="text-xs h-9"
+        >
+          <Plus className="h-4 w-4 mr-1.5" /> Agregar / Vincular Hijo
+        </Button>
       </div>
 
-      {/* Selector de hijo si hay más de uno */}
-      {hijos.length > 1 && (
-        <div className="flex flex-wrap gap-2">
-          {hijos.map(h => (
-            <button
-              key={h.id}
-              onClick={() => cargarDetalle(h)}
-              className={`flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
-                selectedHijo?.id === h.id
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "hover:bg-muted"
-              }`}
+      {/* Tarjeta de Saldo Consolidado Familiar */}
+      <Card className="border shadow-md overflow-hidden bg-gradient-to-br from-card via-card to-muted/30">
+        <CardContent className="p-5 sm:p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Wallet className="h-4 w-4 text-primary" />
+                Saldo Familiar Total
+              </span>
+              <div
+                className={`text-3xl sm:text-4xl font-extrabold font-mono mt-1 ${
+                  saldoFamiliarTotal >= 0 ? "text-emerald-600" : "text-destructive"
+                }`}
+              >
+                ${Math.abs(saldoFamiliarTotal).toFixed(2)}{" "}
+                <span className="text-xs sm:text-sm font-normal text-muted-foreground">
+                  {saldoFamiliarTotal >= 0 ? "(A favor disponible)" : "(Deuda total acumulada)"}
+                </span>
+              </div>
+            </div>
+
+            <Button
+              size="lg"
+              onClick={() => {
+                setMontoAbono("");
+                setReferencia("");
+                setBanco("");
+                setDistribucion("equitativa");
+                setModalAbono(true);
+              }}
+              className="h-12 px-6 font-bold shadow-md bg-primary hover:bg-primary/90 text-sm gap-2"
             >
-              <GraduationCap className="h-3.5 w-3.5" />
-              {h.nombre}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {hijos.length === 0 && (
-        <Card>
-          <CardContent className="py-10 text-center text-muted-foreground">
-            No hay alumnos registrados bajo tu cuenta.
-          </CardContent>
-        </Card>
-      )}
-
-      {selectedHijo && (
-        <>
-          {/* Tarjeta de saldo */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription className="flex items-center gap-1.5">
-                  <GraduationCap className="h-4 w-4" />
-                  {selectedHijo.nombre}
-                </CardDescription>
-                <CardTitle className="text-sm text-muted-foreground font-normal">
-                  {selectedHijo.curso}{selectedHijo.seccion ? ` ${selectedHijo.seccion}` : ""}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground mb-1">Saldo actual</p>
-                <p className={`text-3xl font-bold tabular-nums ${saldoColor(selectedHijo.cuentas_alumnos?.saldo)}`}>
-                  {fmtUsd(selectedHijo.cuentas_alumnos?.saldo ?? 0)}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {Number(selectedHijo.cuentas_alumnos?.saldo ?? 0) < 0
-                    ? "Tiene deuda pendiente"
-                    : Number(selectedHijo.cuentas_alumnos?.saldo ?? 0) > 0
-                    ? "Tiene saldo a favor"
-                    : "Sin deuda ni saldo"}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="flex flex-col justify-between">
-              <CardHeader className="pb-2">
-                <CardDescription className="flex items-center gap-1.5">
-                  <Wallet className="h-4 w-4" />
-                  Reportar un pago
-                </CardDescription>
-                <CardTitle className="text-sm text-muted-foreground font-normal">
-                  El administrador confirmará el abono
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Button
-                  className="w-full"
-                  onClick={() => { setModalAbono(true); setActionErr(null); setAbonoSuccess(false); form.reset({ metodo: "transferencia" }); }}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Reportar abono
-                </Button>
-              </CardContent>
-            </Card>
+              <CreditCard className="h-4 w-4" />
+              Abonar a la Cuenta
+            </Button>
           </div>
 
-          {/* Historial */}
-          {loadingDetalle ? (
-            <div className="h-40 animate-pulse rounded-lg bg-muted" />
-          ) : (
-            <Tabs defaultValue="compras">
-              <TabsList>
-                <TabsTrigger value="compras">
-                  <ShoppingBag className="h-3.5 w-3.5 mr-1.5" />
-                  Compras
-                </TabsTrigger>
-                <TabsTrigger value="abonos">
-                  <Wallet className="h-3.5 w-3.5 mr-1.5" />
-                  Mis abonos
-                </TabsTrigger>
-                <TabsTrigger value="configuracion">
-                  <Settings className="h-3.5 w-3.5 mr-1.5" />
-                  Config.
-                </TabsTrigger>
-              </TabsList>
+          <p className="text-xs text-muted-foreground pt-1 border-t">
+            {hijos.length === 1
+              ? `1 alumno registrado bajo tu cuenta.`
+              : `${hijos.length} alumnos registrados. Los abonos por defecto se reparten equitativamente.`}
+          </p>
+        </CardContent>
+      </Card>
 
-              <TabsContent value="compras">
-                <Card>
-                  <CardContent className="p-0">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Fecha</TableHead>
-                          <TableHead>Productos</TableHead>
-                          <TableHead className="text-right">Total</TableHead>
-                          <TableHead>Método</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {ventas.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                              Sin compras registradas
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          ventas.map(v => (
-                            <TableRow key={v.id}>
-                              <TableCell className="text-xs">{fmtDate(v.created_at)}</TableCell>
-                              <TableCell className="text-xs">
-                                {v.detalle_ventas.map(d =>
-                                  `${d.productos?.nombre ?? "?"} ×${d.cantidad}`
-                                ).join(", ")}
-                              </TableCell>
-                              <TableCell className="text-right font-mono text-sm">
-                                {fmtUsd(v.total_usd)}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant={v.es_fiado ? "destructive" : "outline"} className="text-xs">
-                                  {METODO_LABEL[v.metodo_pago] ?? v.metodo_pago}
-                                </Badge>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </CardContent>
-                </Card>
-              </TabsContent>
+      {/* Lista de Hijos */}
+      <div className="space-y-4">
+        <h2 className="text-base font-bold flex items-center gap-2">
+          <Users className="h-4 w-4 text-primary" />
+          Tus Hijos ({hijos.length})
+        </h2>
 
-              <TabsContent value="abonos">
-                <Card>
-                  <CardContent className="p-0">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Fecha</TableHead>
-                          <TableHead className="text-right">Monto</TableHead>
-                          <TableHead>Método</TableHead>
-                          <TableHead>Estado</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {abonos.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                              Sin abonos reportados
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          abonos.map(a => (
-                            <TableRow key={a.id}>
-                              <TableCell className="text-xs">{fmtDate(a.created_at)}</TableCell>
-                              <TableCell className="text-right font-mono text-sm">
-                                {fmtUsd(a.monto_usd)}
-                                {a.monto_bs && (
-                                  <span className="block text-xs text-muted-foreground">
-                                    {fmtBs(a.monto_bs)}
-                                  </span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-xs">{METODO_LABEL[a.metodo] ?? a.metodo}</TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-1.5">
-                                  {estadoIcon(a.estado)}
-                                  <span className="text-xs capitalize">{a.estado}</span>
+        {hijos.length === 0 ? (
+          <Card className="border border-dashed p-8 text-center space-y-3">
+            <User className="h-10 w-10 text-muted-foreground mx-auto" />
+            <div>
+              <p className="font-semibold text-sm">No tienes ningún hijo registrado aún</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Crea la cuenta de tu hijo pequeño o vincula su cuenta existente en un solo paso.
+              </p>
+            </div>
+            <Button size="sm" onClick={() => setModalHijo(true)}>
+              <Plus className="h-4 w-4 mr-1.5" /> Registrar a mi hijo
+            </Button>
+          </Card>
+        ) : (
+          hijos.map((hijo) => {
+            const saldo = getSaldo(hijo);
+            const expandido = hijoExpandido === hijo.id;
+            const compras = comprasHijo[hijo.id] ?? [];
+            const cargando = cargandoCompras[hijo.id];
+
+            return (
+              <Card key={hijo.id} className="border shadow-xs overflow-hidden">
+                <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="font-bold text-base text-foreground">{hijo.nombre}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {hijo.curso} {hijo.seccion ? `• Sección ${hijo.seccion}` : ""}
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Saldo:</span>
+                      <span
+                        className={`font-mono font-bold text-sm ${
+                          saldo >= 0 ? "text-emerald-600" : "text-destructive"
+                        }`}
+                      >
+                        ${Math.abs(saldo).toFixed(2)} {saldo < 0 ? "(Deuda)" : "(Disponible)"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2 sm:pt-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-9 flex-1 sm:flex-initial"
+                      onClick={() => setModalCarnet(hijo)}
+                    >
+                      <QrCode className="h-3.5 w-3.5 mr-1.5" />
+                      Carnet QR
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="text-xs h-9 flex-1 sm:flex-initial"
+                      onClick={() => toggleVerCompras(hijo.id)}
+                    >
+                      <ShoppingBag className="h-3.5 w-3.5 mr-1.5" />
+                      {expandido ? "Ocultar" : "Consumos"}
+                      {expandido ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Desglose de Consumos Detallados del Hijo */}
+                {expandido && (
+                  <div className="border-t bg-muted/20 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                        Historial de Compras Detalladas
+                      </span>
+                      {compras.length > 0 && (
+                        <span className="text-xs text-muted-foreground font-mono">
+                          {compras.length} compras registradas
+                        </span>
+                      )}
+                    </div>
+
+                    {cargando ? (
+                      <div className="p-6 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Cargando consumos...
+                      </div>
+                    ) : compras.length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-4">
+                        Sin compras registradas para este alumno.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {compras.map((v) => {
+                          const fecha = new Date(v.created_at).toLocaleString("es-VE", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          });
+
+                          return (
+                            <div key={v.id} className="p-3 rounded-lg border bg-card text-xs space-y-2">
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                                    <span className="font-semibold text-foreground">{fecha}</span>
+                                    <Badge
+                                      variant={v.es_fiado ? "destructive" : "secondary"}
+                                      className="text-[10px] py-0"
+                                    >
+                                      {v.es_fiado ? "Fiado" : "Saldo"}
+                                    </Badge>
+                                  </div>
+                                  {v.vendedor && (
+                                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                                      Atendido por: {v.vendedor.nombre}
+                                    </div>
+                                  )}
                                 </div>
-                                {a.estado === "rechazado" && a.motivo_rechazo && (
-                                  <p className="text-xs text-destructive mt-0.5">{a.motivo_rechazo}</p>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </CardContent>
-                </Card>
-              </TabsContent>
 
-              <TabsContent value="configuracion">
-                <TabConfiguracion />
-              </TabsContent>
-            </Tabs>
-          )}
-        </>
-      )}
+                                <div className="text-right font-mono">
+                                  <div className="font-bold text-sm text-foreground">
+                                    ${Number(v.total_usd).toFixed(2)}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground">
+                                    Bs. {Number(v.total_bs).toFixed(1)}
+                                  </div>
+                                </div>
+                              </div>
 
-      {/* Modal reportar abono */}
+                              {/* Lista de productos consumidos */}
+                              <div className="border-t pt-1.5 divide-y divide-border/40">
+                                {v.detalle_ventas.map((d) => (
+                                  <div key={d.id} className="py-1 flex justify-between items-center text-[11px]">
+                                    <span>
+                                      <strong className="text-foreground">{d.productos?.nombre ?? "Producto"}</strong>{" "}
+                                      <span className="text-muted-foreground font-mono">× {d.cantidad}</span>
+                                    </span>
+                                    <span className="font-mono text-muted-foreground">
+                                      ${(d.cantidad * Number(d.precio_usd_unitario)).toFixed(2)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            );
+          })
+        )}
+      </div>
+
+      {/* Modal de Abono */}
       <Dialog open={modalAbono} onOpenChange={setModalAbono}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-w-md p-5 sm:p-6">
           <DialogHeader>
-            <DialogTitle>Reportar abono — {selectedHijo?.nombre}</DialogTitle>
+            <DialogTitle className="text-lg font-bold">Reportar Abono a la Cuenta</DialogTitle>
+            <CardDescription>
+              Fija los fondos al valor BCV del día para consumos de tus hijos.
+            </CardDescription>
           </DialogHeader>
 
-          {abonoSuccess ? (
-            <div className="py-4 text-center space-y-3">
-              <CheckCircle2 className="h-10 w-10 text-green-600 mx-auto" />
-              <p className="font-medium">Abono reportado con éxito</p>
-              <p className="text-sm text-muted-foreground">
-                El administrador revisará y confirmará el pago.
-              </p>
-              <Button onClick={() => setModalAbono(false)} className="w-full">
-                Cerrar
-              </Button>
+          <form onSubmit={handleEnviarAbono} className="space-y-4 pt-2">
+            {/* Monto en USD */}
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Monto a abonar (USD)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0.5"
+                placeholder="Ej. 20.00"
+                value={montoAbono}
+                onChange={(e) => setMontoAbono(e.target.value)}
+                className="h-11 font-mono text-base"
+                required
+              />
             </div>
-          ) : (
-            <form onSubmit={form.handleSubmit(onReportarAbono)} className="space-y-4 pt-2">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Monto USD</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="20.00"
-                    {...form.register("montoUsd", { valueAsNumber: true })}
-                  />
-                  {form.formState.errors.montoUsd && (
-                    <p className="text-xs text-destructive">{form.formState.errors.montoUsd.message}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Método</Label>
-                  <Select
-                    defaultValue="transferencia"
-                    onValueChange={(v: string | null) => form.setValue("metodo", (v ?? "transferencia") as AbonoForm["metodo"])}
+
+            {/* Reparto Familiar si tiene más de 1 hijo */}
+            {hijos.length > 1 && (
+              <div className="space-y-2 p-3 rounded-lg border bg-muted/30">
+                <Label className="text-xs font-semibold">¿Cómo deseas repartir este abono?</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDistribucion("equitativa")}
+                    className={`p-2 rounded-lg border text-xs font-semibold text-center transition-all ${
+                      distribucion === "equitativa"
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background hover:bg-muted"
+                    }`}
                   >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="efectivo_usd">Efectivo USD</SelectItem>
-                      <SelectItem value="efectivo_bs">Efectivo Bs</SelectItem>
-                      <SelectItem value="pago_movil">Pago Móvil</SelectItem>
-                      <SelectItem value="transferencia">Transferencia</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    Equitativo (Todos)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDistribucion("individual")}
+                    className={`p-2 rounded-lg border text-xs font-semibold text-center transition-all ${
+                      distribucion === "individual"
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background hover:bg-muted"
+                    }`}
+                  >
+                    Un solo hijo
+                  </button>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Referencia (opcional)</Label>
-                  <Input placeholder="Nº de operación" {...form.register("referencia")} />
+
+                {distribucion === "individual" && (
+                  <div className="pt-2">
+                    <Select value={hijoSeleccionadoId} onValueChange={(v) => setHijoSeleccionadoId(v ?? "")}>
+                      <SelectTrigger className="h-10 text-xs">
+                        <SelectValue placeholder="Selecciona el hijo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {hijos.map((h) => (
+                          <SelectItem key={h.id} value={h.id}>
+                            {h.nombre} ({h.curso})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Método de Pago */}
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Método de pago</Label>
+              <Select
+                value={metodoPago}
+                onValueChange={(v) => setMetodoPago(v as any)}
+              >
+                <SelectTrigger className="h-10 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pago_movil">Pago Móvil</SelectItem>
+                  <SelectItem value="transferencia">Transferencia Bancaria</SelectItem>
+                  <SelectItem value="efectivo_usd">Efectivo USD (Presencial)</SelectItem>
+                  <SelectItem value="efectivo_bs">Efectivo Bs (Presencial)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Referencia y Banco (SOLO si NO es efectivo) */}
+            {!esEfectivo ? (
+              <div className="space-y-3 p-3 rounded-lg border bg-muted/20">
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold">Número de Referencia *</Label>
+                  <Input
+                    placeholder="Últimos 4 o 6 dígitos de la referencia"
+                    value={referencia}
+                    onChange={(e) => setReferencia(e.target.value)}
+                    className="h-10 text-xs"
+                    required
+                  />
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Banco (opcional)</Label>
-                  <Input placeholder="Banco origen" {...form.register("banco")} />
+
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold">Banco emisor (Opcional)</Label>
+                  <Input
+                    placeholder="Banesco, Mercantil, Venezuela..."
+                    value={banco}
+                    onChange={(e) => setBanco(e.target.value)}
+                    className="h-10 text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold">Comprobante de captura (Opcional)</Label>
+                  <Input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setComprobante(e.target.files?.[0] ?? null)}
+                    className="text-xs h-9 cursor-pointer"
+                  />
                 </div>
               </div>
-
-              <div className="space-y-1.5">
-                <Label>Comprobante (opcional)</Label>
-                <Input
-                  ref={comprobanteRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="cursor-pointer"
-                />
-                <p className="text-xs text-muted-foreground">JPG, PNG o WebP — máximo 5 MB</p>
+            ) : (
+              <div className="p-3 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                <span>
+                  Pago en efectivo presencial. No requiere ingresar referencia bancaria; el administrador lo confirmará al recibir los billetes.
+                </span>
               </div>
+            )}
 
-              {actionErr && <p className="text-xs text-destructive">{actionErr}</p>}
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="outline" onClick={() => setModalAbono(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={enviandoAbono}>
+                {enviandoAbono ? "Enviando..." : "Reportar Abono"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setModalAbono(false)}>
-                  Cancelar
-                </Button>
-                <Button type="submit" disabled={saving}>
-                  {saving ? "Enviando..." : "Reportar abono"}
-                </Button>
-              </DialogFooter>
-            </form>
+      {/* Modal de Carnet QR */}
+      <Dialog open={!!modalCarnet} onOpenChange={(o) => !o && setModalCarnet(null)}>
+        <DialogContent className="max-w-sm p-4 sm:p-6">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-center">
+              Carnet Escolar de {modalCarnet?.nombre}
+            </DialogTitle>
+          </DialogHeader>
+
+          {modalCarnet && (
+            <div className="pt-1">
+              <QrCarnetCard
+                alumnoId={modalCarnet.id}
+                nombre={modalCarnet.nombre}
+                curso={modalCarnet.curso}
+                seccion={modalCarnet.seccion}
+              />
+            </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Registrar o Vincular Hijo */}
+      <Dialog open={modalHijo} onOpenChange={setModalHijo}>
+        <DialogContent className="max-w-md p-5 sm:p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Agregar o Vincular Hijo</DialogTitle>
+            <CardDescription>
+              {modoHijo === "crear"
+                ? "Crea una cuenta para tu hijo pequeño si aún no tiene cédula."
+                : "Si tu hijo es más grande y ya se registró por su cuenta, ingrésalo aquí."}
+            </CardDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setModoHijo("crear")}
+              className={`py-2 text-xs font-semibold rounded-lg border transition-all ${
+                modoHijo === "crear" ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"
+              }`}
+            >
+              Registrar pequeño
+            </button>
+            <button
+              type="button"
+              onClick={() => setModoHijo("vincular")}
+              className={`py-2 text-xs font-semibold rounded-lg border transition-all ${
+                modoHijo === "vincular" ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"
+              }`}
+            >
+              Vincular existente
+            </button>
+          </div>
+
+          <form onSubmit={handleGuardarHijo} className="space-y-3 pt-3">
+            {modoHijo === "crear" ? (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold">Nombre y Apellido del alumno *</Label>
+                  <Input
+                    placeholder="Ej. Sofía Hernández"
+                    value={nombreHijo}
+                    onChange={(e) => setNombreHijo(e.target.value)}
+                    className="h-10 text-xs"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Grado / Curso *</Label>
+                    <Input
+                      placeholder="Ej. 3er Grado"
+                      value={cursoHijo}
+                      onChange={(e) => setCursoHijo(e.target.value)}
+                      className="h-10 text-xs"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Sección</Label>
+                    <Input
+                      placeholder="Ej. A o B"
+                      value={seccionHijo}
+                      onChange={(e) => setSeccionHijo(e.target.value)}
+                      className="h-10 text-xs"
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">Cédula o Código de Alumno *</Label>
+                <Input
+                  placeholder="Ingresa la cédula o código"
+                  value={cedulaOCodigo}
+                  onChange={(e) => setCedulaOCodigo(e.target.value)}
+                  className="h-10 text-xs"
+                  required
+                />
+              </div>
+            )}
+
+            <DialogFooter className="pt-3">
+              <Button type="button" variant="outline" onClick={() => setModalHijo(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={guardandoHijo}>
+                {guardandoHijo ? "Guardando..." : modoHijo === "crear" ? "Registrar Hijo" : "Vincular"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

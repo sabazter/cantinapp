@@ -1,33 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { toast } from "sonner";
+import {
+  Search, Trash2, Plus, Minus, CheckCircle,
+  AlertCircle, RefreshCw, QrCode, User, X,
+  FileDown, Camera,
+} from "lucide-react";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import {
-  Minus, Plus, Trash2, Search, ShoppingCart, User, Loader2, CheckCircle2, Download, WifiOff,
-} from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { encolarVenta } from "@/lib/idb";
+import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface Producto {
   id: string;
   nombre: string;
-  categoria: "tienda" | "menu";
+  categoria: string;
   precio_usd: string;
-  precio_jornada_usd: string | null;
-  stock: number;
+  precio_jornada_usd?: string | null;
   activo: boolean;
 }
 
@@ -40,64 +37,61 @@ interface Alumno {
   nombre: string;
   curso: string;
   seccion: string | null;
-  fiado_habilitado: boolean;
-  limite_fiado_usd: string | null;
-  cuentas_alumnos: { saldo: string } | null;
+  fiado_habilitado?: boolean;
+  limite_fiado_usd?: string | null;
+  cuentas_alumnos: { saldo: string } | null | { saldo: string }[];
 }
 
 interface TasaBcv {
   tasa: number;
   fecha: string;
-  fuente: "automatica" | "manual";
+  fuente: string;
 }
 
-type MetodoPago = "efectivo_usd" | "efectivo_bs" | "pago_movil" | "fiado";
-
-const METODOS: { value: MetodoPago; label: string }[] = [
-  { value: "efectivo_usd", label: "Efectivo USD" },
-  { value: "efectivo_bs",  label: "Efectivo Bs"  },
-  { value: "pago_movil",   label: "Pago Móvil"   },
-  { value: "fiado",        label: "Fiado"         },
-];
+interface Recibo {
+  id: string;
+  totalUsd: number;
+  totalBs: number;
+  tasa: number;
+  items: { nombre: string; cantidad: number; precioUsd: number }[];
+  alumnoNombre: string | null;
+  metodoPago: string;
+  fecha: string;
+}
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export function CajaClient() {
-  // Products & cart
-  const [productos, setProductos]   = useState<Producto[]>([]);
-  const [carrito, setCarrito]       = useState<CartItem[]>([]);
-  const [prodSearch, setProdSearch] = useState("");
+  const [productos, setProductos] = useState<Producto[]>([]);
+  const [tasa, setTasa]           = useState<TasaBcv | null>(null);
+  const [loading, setLoading]     = useState(true);
+
+  // Filtros
   const [catFilter, setCatFilter]   = useState<"todos" | "tienda" | "menu">("todos");
+  const [prodSearch, setProdSearch] = useState("");
+
+  // Carrito
+  const [carrito, setCarrito] = useState<CartItem[]>([]);
 
   // Alumno
-  const [alumnoSearch, setAlumnoSearch]   = useState("");
-  const [alumnoResults, setAlumnoResults] = useState<Alumno[]>([]);
-  const [selectedAlumno, setSelectedAlumno] = useState<Alumno | null>(null);
+  const [alumnoSearch, setAlumnoSearch]       = useState("");
+  const [alumnoResults, setAlumnoResults]     = useState<Alumno[]>([]);
+  const [selectedAlumno, setSelectedAlumno]   = useState<Alumno | null>(null);
   const [searchingAlumno, setSearchingAlumno] = useState(false);
+  const [scannerOpen, setScannerOpen]         = useState(false);
 
-  // BCV
-  const [tasa, setTasa] = useState<TasaBcv | null>(null);
+  // Modo de pago: "saldo" (débito de cuenta virtual) o "fiado" (crédito manual)
+  const [metodoPago, setMetodoPago] = useState<"saldo" | "fiado">("saldo");
 
-  // Payment
-  const [metodoPago, setMetodoPago] = useState<MetodoPago>("efectivo_usd");
-  const [referencia, setReferencia] = useState("");
-
-  // State
-  const [loading, setLoading]       = useState(true);
-  const [processing, setProcessing] = useState(false);
-  const [error, setError]           = useState<string | null>(null);
+  // Estado de checkout
+  const [processing, setProcessing]     = useState(false);
+  const [error, setError]               = useState<string | null>(null);
   const [successModal, setSuccessModal] = useState(false);
-  const [lastRecibo, setLastRecibo]     = useState<{
-    id: string; totalUsd: number; totalBs: number; tasa: number;
-    items: { nombre: string; cantidad: number; precioUsd: number }[];
-    alumnoNombre: string | null;
-    metodoPago: string;
-    fecha: string;
-  } | null>(null);
+  const [lastRecibo, setLastRecibo]     = useState<Recibo | null>(null);
 
-  // Load productos & BCV rate
-  useEffect(() => {
-    async function load() {
+  // ── Cargar productos y tasa BCV ─────────────────────────────────────────────
+  const loadData = useCallback(async () => {
+    try {
       const [prodRes, bcvRes] = await Promise.all([
         fetch("/api/admin/inventario"),
         fetch("/api/admin/bcv"),
@@ -107,12 +101,18 @@ export function CajaClient() {
         const bcvData = await bcvRes.json();
         setTasa(bcvData.activa);
       }
+    } catch {
+      toast.error("Error al cargar datos de caja");
+    } finally {
       setLoading(false);
     }
-    load();
   }, []);
 
-  // Alumno search (debounced)
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // ── Búsqueda de alumno por texto (debounced) ────────────────────────────────
   useEffect(() => {
     if (alumnoSearch.length < 2) {
       setAlumnoResults([]);
@@ -122,7 +122,11 @@ export function CajaClient() {
       setSearchingAlumno(true);
       try {
         const res = await fetch(`/api/admin/alumnos/buscar?q=${encodeURIComponent(alumnoSearch)}`);
-        if (res.ok) setAlumnoResults(await res.json());
+        if (res.ok) {
+          const list = await res.json();
+          setAlumnoResults(list);
+        }
+      } catch {
       } finally {
         setSearchingAlumno(false);
       }
@@ -130,64 +134,128 @@ export function CajaClient() {
     return () => clearTimeout(timer);
   }, [alumnoSearch]);
 
-  const addToCart = useCallback((prod: Producto) => {
-    if (prod.stock === 0) return;
-    setCarrito(prev => {
-      const existing = prev.find(i => i.id === prod.id);
-      if (existing) {
-        if (existing.cantidad >= prod.stock) return prev;
-        return prev.map(i => i.id === prod.id ? { ...i, cantidad: i.cantidad + 1 } : i);
+  // ── Identificación por escaneo QR ───────────────────────────────────────────
+  const handleQrScan = useCallback(async (scannedId: string) => {
+    toast.info("Identificando alumno...", { duration: 1200 });
+    try {
+      // Intentar primero por ID exacto
+      let res = await fetch(`/api/admin/alumnos/buscar?id=${encodeURIComponent(scannedId)}`);
+      if (res.ok) {
+        const list = await res.json();
+        if (Array.isArray(list) && list.length > 0) {
+          setSelectedAlumno(list[0]);
+          setAlumnoSearch("");
+          setAlumnoResults([]);
+          setMetodoPago("saldo");
+          toast.success(`Alumno identificado: ${list[0].nombre}`);
+          return;
+        }
+      }
+      // Si no encontró por ID, intentar por q
+      res = await fetch(`/api/admin/alumnos/buscar?q=${encodeURIComponent(scannedId)}`);
+      if (res.ok) {
+        const list = await res.json();
+        if (Array.isArray(list) && list.length > 0) {
+          setSelectedAlumno(list[0]);
+          setAlumnoSearch("");
+          setAlumnoResults([]);
+          setMetodoPago("saldo");
+          toast.success(`Alumno identificado: ${list[0].nombre}`);
+          return;
+        }
+      }
+      toast.error("Código QR no corresponde a ningún alumno activo");
+    } catch {
+      toast.error("Error al buscar alumno por QR");
+    }
+  }, []);
+
+  // ── Carrito ─────────────────────────────────────────────────────────────────
+  const precioEfectivo = (p: Producto) =>
+    p.precio_jornada_usd ? Number(p.precio_jornada_usd) : Number(p.precio_usd);
+
+  const addToCart = (prod: Producto) => {
+    setCarrito((prev) => {
+      const exists = prev.find((i) => i.id === prod.id);
+      if (exists) {
+        return prev.map((i) => (i.id === prod.id ? { ...i, cantidad: i.cantidad + 1 } : i));
       }
       return [...prev, { ...prod, cantidad: 1 }];
     });
-  }, []);
+  };
 
-  const updateQty = useCallback((id: string, delta: number) => {
-    setCarrito(prev =>
-      prev.flatMap(i => {
+  const updateQty = (id: string, delta: number) => {
+    setCarrito((prev) =>
+      prev.flatMap((i) => {
         if (i.id !== id) return [i];
         const next = i.cantidad + delta;
         if (next <= 0) return [];
-        if (next > i.stock) return [i];
         return [{ ...i, cantidad: next }];
       })
     );
-  }, []);
+  };
 
-  const removeFromCart = useCallback((id: string) => {
-    setCarrito(prev => prev.filter(i => i.id !== id));
-  }, []);
+  const removeFromCart = (id: string) => {
+    setCarrito((prev) => prev.filter((i) => i.id !== id));
+  };
 
-  const precioEfectivo = (prod: Producto) =>
-    prod.precio_jornada_usd ? Number(prod.precio_jornada_usd) : Number(prod.precio_usd);
+  const totalUsd = useMemo(() => {
+    return carrito.reduce((sum, item) => sum + precioEfectivo(item) * item.cantidad, 0);
+  }, [carrito]);
 
-  const totalUsd  = carrito.reduce((s, i) => s + precioEfectivo(i) * i.cantidad, 0);
-  const totalBs   = tasa ? totalUsd * tasa.tasa : null;
+  const totalBs = tasa ? totalUsd * tasa.tasa : null;
 
-  const prodsFiltrados = productos.filter(p => {
-    if (!p.activo) return false;
-    if (catFilter !== "todos" && p.categoria !== catFilter) return false;
-    if (prodSearch && !p.nombre.toLowerCase().includes(prodSearch.toLowerCase())) return false;
-    return true;
-  });
+  // Saldo del alumno seleccionado
+  const saldoAlumno = useMemo(() => {
+    if (!selectedAlumno) return 0;
+    const c = Array.isArray(selectedAlumno.cuentas_alumnos)
+      ? selectedAlumno.cuentas_alumnos[0]
+      : selectedAlumno.cuentas_alumnos;
+    return Number(c?.saldo ?? 0);
+  }, [selectedAlumno]);
 
-  async function confirmarVenta() {
-    if (carrito.length === 0) return;
-    if (metodoPago === "fiado" && !selectedAlumno) {
-      setError("Fiado requiere seleccionar un alumno");
+  // ── Confirmar cobro ─────────────────────────────────────────────────────────
+  async function confirmarCobro() {
+    if (carrito.length === 0) {
+      setError("El carrito está vacío");
       return;
     }
+    if (!selectedAlumno) {
+      setError("Es obligatorio escanear el QR o seleccionar al alumno para cobrar");
+      return;
+    }
+
+    // Validación de cobro con saldo o fiado
+    if (metodoPago === "fiado") {
+      if (!selectedAlumno.fiado_habilitado) {
+        setError(`"${selectedAlumno.nombre}" no tiene habilitado el fiado`);
+        return;
+      }
+      const limite = selectedAlumno.limite_fiado_usd ? Number(selectedAlumno.limite_fiado_usd) : null;
+      const deudaActual = saldoAlumno < 0 ? Math.abs(saldoAlumno) : 0;
+      if (limite !== null && deudaActual + totalUsd > limite) {
+        setError(`Excede el límite de fiado ($${limite.toFixed(2)}). Deuda actual: $${deudaActual.toFixed(2)}`);
+        return;
+      }
+    } else {
+      // metodoPago === "saldo"
+      // Si el saldo no alcanza completamente, verificar si puede pasar a fiado
+      if (saldoAlumno < totalUsd && !selectedAlumno.fiado_habilitado) {
+        setError(`Saldo insuficiente ($${saldoAlumno.toFixed(2)} disp.) y no tiene fiado habilitado`);
+        return;
+      }
+    }
+
     setProcessing(true);
     setError(null);
 
     const payload = {
-      alumnoId:   selectedAlumno?.id,
-      metodoPago,
-      referencia: referencia || undefined,
-      items:      carrito.map(i => ({ productoId: i.id, cantidad: i.cantidad })),
+      alumnoId:   selectedAlumno.id,
+      metodoPago: "fiado", // En backend se procesa contra la cuenta del alumno
+      items:      carrito.map((i) => ({ productoId: i.id, cantidad: i.cantidad })),
     };
 
-    // Sin conexión: encolar en IndexedDB
+    // Modo offline (IndexedDB)
     if (!navigator.onLine) {
       await encolarVenta(payload);
       setLastRecibo({
@@ -195,15 +263,13 @@ export function CajaClient() {
         totalUsd,
         totalBs:      totalBs ?? 0,
         tasa:         tasa?.tasa ?? 0,
-        items:        carrito.map(i => ({ nombre: i.nombre, cantidad: i.cantidad, precioUsd: precioEfectivo(i) })),
-        alumnoNombre: selectedAlumno?.nombre ?? null,
-        metodoPago,
+        items:        carrito.map((i) => ({ nombre: i.nombre, cantidad: i.cantidad, precioUsd: precioEfectivo(i) })),
+        alumnoNombre: selectedAlumno.nombre,
+        metodoPago:   metodoPago === "saldo" ? "Saldo en Cuenta" : "Fiado a Crédito",
         fecha:        new Date().toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }),
       });
       setCarrito([]);
       setSelectedAlumno(null);
-      setAlumnoSearch("");
-      setReferencia("");
       setSuccessModal(true);
       setProcessing(false);
       return;
@@ -216,459 +282,501 @@ export function CajaClient() {
         body:    JSON.stringify(payload),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        throw new Error(data.error ?? "Error al procesar la venta");
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error ?? "Error al procesar la venta");
       }
 
+      const d = await res.json();
       setLastRecibo({
-        id:          data.id,
-        totalUsd:    data.totalUsd,
-        totalBs:     data.totalBs,
-        tasa:        data.tasaBcv,
-        items:       carrito.map(i => ({ nombre: i.nombre, cantidad: i.cantidad, precioUsd: precioEfectivo(i) })),
-        alumnoNombre: selectedAlumno?.nombre ?? null,
-        metodoPago,
-        fecha:       new Date().toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }),
+        id:           d.id ?? `V-${Date.now()}`,
+        totalUsd,
+        totalBs:      totalBs ?? 0,
+        tasa:         tasa?.tasa ?? 0,
+        items:        carrito.map((i) => ({ nombre: i.nombre, cantidad: i.cantidad, precioUsd: precioEfectivo(i) })),
+        alumnoNombre: selectedAlumno.nombre,
+        metodoPago:   metodoPago === "saldo" ? "Saldo en Cuenta" : "Fiado a Crédito",
+        fecha:        new Date().toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }),
       });
+
       setCarrito([]);
       setSelectedAlumno(null);
-      setAlumnoSearch("");
-      setReferencia("");
       setSuccessModal(true);
-
-      // Refrescar stock
-      const prodRes = await fetch("/api/admin/inventario");
-      if (prodRes.ok) setProductos(await prodRes.json());
-
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error inesperado");
+      setError((err as Error).message);
     } finally {
       setProcessing(false);
     }
   }
 
-  const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
-  const fmtBs  = (n: number) =>
-    new Intl.NumberFormat("es-VE", { minimumFractionDigits: 2 }).format(n) + " Bs";
-
-  const descargarPDF = async () => {
+  // ── Generar ticket PDF ──────────────────────────────────────────────────────
+  function descargarReciboPdf() {
     if (!lastRecibo) return;
-    const { jsPDF } = await import("jspdf");
-    const doc = new jsPDF({ unit: "mm", format: [80, 160], orientation: "portrait" });
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.text("CantinApp", 40, 12, { align: "center" });
-
-    doc.setFont("helvetica", "normal");
+    const doc = new jsPDF({ format: [80, 160], unit: "mm" });
+    doc.setFontSize(12);
+    doc.text("CantinApp — Recibo de Cobro", 40, 10, { align: "center" });
     doc.setFontSize(8);
-    doc.text(`Fecha: ${lastRecibo.fecha}`, 6, 20);
-    doc.text(`Ref: ${lastRecibo.id.slice(-8).toUpperCase()}`, 6, 25);
-    doc.text(`Pago: ${lastRecibo.metodoPago.replace(/_/g, " ")}`, 6, 30);
+    doc.text(`Fecha: ${lastRecibo.fecha}`, 40, 16, { align: "center" });
     if (lastRecibo.alumnoNombre) {
-      doc.text(`Alumno: ${lastRecibo.alumnoNombre}`, 6, 35);
+      doc.text(`Cliente: ${lastRecibo.alumnoNombre}`, 40, 20, { align: "center" });
     }
+    doc.text(`Modo: ${lastRecibo.metodoPago}`, 40, 24, { align: "center" });
+    doc.text(`Tasa BCV: ${lastRecibo.tasa.toFixed(2)} Bs/$`, 40, 28, { align: "center" });
 
-    doc.setDrawColor(180);
-    doc.line(6, 38, 74, 38);
+    autoTable(doc, {
+      startY: 32,
+      head: [["Prod", "Cant", "$ Unit", "Total"]],
+      body: lastRecibo.items.map((i) => [
+        i.nombre,
+        i.cantidad,
+        `$${i.precioUsd.toFixed(2)}`,
+        `$${(i.cantidad * i.precioUsd).toFixed(2)}`,
+      ]),
+      theme: "plain",
+      styles: { fontSize: 7, cellPadding: 1 },
+      columnStyles: { 0: { cellWidth: 32 }, 1: { cellWidth: 10 }, 2: { cellWidth: 14 }, 3: { cellWidth: 14 } },
+    });
 
-    let y = 44;
-    doc.setFont("helvetica", "bold");
-    doc.text("Producto", 6, y);
-    doc.text("Cant", 46, y, { align: "right" });
-    doc.text("USD", 74, y, { align: "right" });
-    y += 4;
-    doc.setFont("helvetica", "normal");
-    doc.line(6, y, 74, y);
-    y += 4;
-
-    for (const item of lastRecibo.items) {
-      const nombre = item.nombre.length > 22 ? item.nombre.slice(0, 21) + "…" : item.nombre;
-      doc.text(nombre, 6, y);
-      doc.text(String(item.cantidad), 46, y, { align: "right" });
-      doc.text(fmtUsd(item.precioUsd * item.cantidad), 74, y, { align: "right" });
-      y += 5;
-    }
-
-    doc.setDrawColor(180);
-    doc.line(6, y, 74, y);
-    y += 5;
-
-    doc.setFont("helvetica", "bold");
+    const finalY = (doc as any).lastAutoTable?.finalY ?? 60;
     doc.setFontSize(10);
-    doc.text("Total USD:", 6, y);
-    doc.text(fmtUsd(lastRecibo.totalUsd), 74, y, { align: "right" });
-    y += 5;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.text(`Total Bs (${lastRecibo.tasa.toFixed(2)}):`, 6, y);
-    doc.text(fmtBs(lastRecibo.totalBs), 74, y, { align: "right" });
-    y += 8;
-
-    doc.setFont("helvetica", "italic");
+    doc.text(`Total USD: $${lastRecibo.totalUsd.toFixed(2)}`, 40, finalY + 6, { align: "center" });
+    doc.text(`Total Bs:  Bs. ${lastRecibo.totalBs.toFixed(2)}`, 40, finalY + 11, { align: "center" });
     doc.setFontSize(7);
-    doc.text("Gracias por su compra", 40, y, { align: "center" });
+    doc.text("¡Gracias por su compra!", 40, finalY + 18, { align: "center" });
+    doc.save(`recibo-${lastRecibo.id}.pdf`);
+  }
 
-    doc.save(`recibo-${lastRecibo.id.slice(-8).toUpperCase()}.pdf`);
-  };
+  // ── Productos filtrados ─────────────────────────────────────────────────────
+  const prodsFiltrados = productos.filter((p) => {
+    if (!p.activo) return false;
+    if (catFilter !== "todos" && p.categoria !== catFilter) return false;
+    if (prodSearch && !p.nombre.toLowerCase().includes(prodSearch.toLowerCase())) return false;
+    return true;
+  });
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
-      {/* Left: Product catalog */}
-      <div className="flex-1 flex flex-col overflow-hidden border-r">
-        {/* BCV status bar */}
-        <div className="px-4 py-1.5 bg-muted/50 border-b flex items-center gap-2 text-xs text-muted-foreground">
-          {tasa ? (
-            <>
-              <span className="font-medium text-foreground">
-                Tasa BCV: {fmtBs(tasa.tasa).replace(" Bs", "")} Bs/USD
-              </span>
-              <Badge variant={tasa.fuente === "manual" ? "secondary" : "outline"} className="text-[10px] py-0">
-                {tasa.fuente === "manual" ? "manual" : "automática"}
-              </Badge>
-              <span>{tasa.fecha}</span>
-            </>
-          ) : (
-            <span className="text-amber-600">Sin tasa BCV — contacte al administrador</span>
+    <div className="p-3 sm:p-6 max-w-7xl mx-auto space-y-4">
+      {/* Barra superior de tasa y estado */}
+      <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b">
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Caja / Punto de Cobro</h1>
+          {tasa && (
+            <Badge variant="outline" className="text-xs font-mono bg-background">
+              BCV: {tasa.tasa.toFixed(2)} Bs/$
+            </Badge>
           )}
         </div>
+        <Button variant="ghost" size="sm" onClick={loadData} disabled={loading} className="h-8">
+          <RefreshCw className={`h-3.5 w-3.5 mr-1 ${loading ? "animate-spin" : ""}`} /> Actualizar
+        </Button>
+      </div>
 
-        {/* Search & filters */}
-        <div className="flex gap-2 p-3 border-b">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              className="pl-8 h-8 text-sm"
-              placeholder="Buscar producto..."
-              value={prodSearch}
-              onChange={e => setProdSearch(e.target.value)}
-            />
-          </div>
-          <div className="flex gap-1">
-            {(["todos", "tienda", "menu"] as const).map(cat => (
-              <Button
-                key={cat}
-                variant={catFilter === cat ? "default" : "outline"}
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => setCatFilter(cat)}
-              >
-                {cat === "todos" ? "Todos" : cat === "tienda" ? "Tienda" : "Menú"}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        {/* Product grid */}
-        <div className="flex-1 overflow-y-auto p-3">
-          {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {Array.from({ length: 9 }).map((_, i) => (
-                <div key={i} className="h-20 animate-pulse rounded-md bg-muted" />
+      {/* Grid principal: Izquierda Catálogo | Derecha Carrito y Cobro */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 pb-20 lg:pb-0">
+        {/* Catálogo de Productos (7 columnas en desktop) */}
+        <div className="lg:col-span-7 space-y-3">
+          {/* Buscador y categorías */}
+          <div className="flex gap-2 items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar producto..."
+                value={prodSearch}
+                onChange={(e) => setProdSearch(e.target.value)}
+                className="pl-9 text-base sm:text-sm h-10"
+              />
+            </div>
+            <div className="flex gap-1">
+              {(["todos", "tienda", "menu"] as const).map((cat) => (
+                <Button
+                  key={cat}
+                  variant={catFilter === cat ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setCatFilter(cat)}
+                  className="h-10 text-xs px-3 capitalize"
+                >
+                  {cat === "todos" ? "Todos" : cat === "tienda" ? "Tienda" : "Menú"}
+                </Button>
               ))}
             </div>
+          </div>
+
+          {/* Grilla de productos sin stock */}
+          {loading ? (
+            <div className="p-12 text-center text-sm text-muted-foreground">Cargando catálogo...</div>
           ) : prodsFiltrados.length === 0 ? (
-            <p className="text-center text-muted-foreground text-sm py-10">Sin productos</p>
+            <div className="p-12 text-center text-sm text-muted-foreground border rounded-xl bg-card">
+              No hay productos disponibles
+            </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {prodsFiltrados.map(prod => {
-                const enCarrito = carrito.find(i => i.id === prod.id)?.cantidad ?? 0;
-                const sinStock  = prod.stock === 0;
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {prodsFiltrados.map((p) => {
+                const precio = precioEfectivo(p);
+                const enCarrito = carrito.find((i) => i.id === p.id);
+
                 return (
                   <button
-                    key={prod.id}
-                    disabled={sinStock}
-                    onClick={() => addToCart(prod)}
-                    className={`rounded-md border p-3 text-left transition-colors ${
-                      sinStock
-                        ? "opacity-40 cursor-not-allowed bg-muted"
-                        : "hover:bg-accent hover:border-primary/40 cursor-pointer"
-                    }`}
+                    key={p.id}
+                    onClick={() => addToCart(p)}
+                    className="p-3 text-left rounded-xl border bg-card hover:bg-accent/40 active:scale-[0.98] transition-all flex flex-col justify-between min-h-[96px] shadow-2xs relative group"
                   >
-                    <p className="text-sm font-medium leading-tight line-clamp-2">{prod.nombre}</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {prod.precio_jornada_usd ? (
-                        <span className="text-blue-600 font-semibold">{fmtUsd(Number(prod.precio_jornada_usd))}</span>
-                      ) : fmtUsd(Number(prod.precio_usd))}
+                    <div>
+                      <div className="font-semibold text-sm line-clamp-2 leading-tight">{p.nombre}</div>
+                      <div className="text-[11px] text-muted-foreground capitalize mt-0.5">{p.categoria}</div>
+                    </div>
+                    <div className="flex items-baseline justify-between mt-2 pt-1 border-t w-full">
+                      <span className="font-mono font-bold text-sm text-primary">${precio.toFixed(2)}</span>
                       {tasa && (
-                        <span className="ml-1 text-[10px]">
-                          · {fmtBs(precioEfectivo(prod) * tasa.tasa)}
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          Bs. {(precio * tasa.tasa).toFixed(1)}
                         </span>
                       )}
-                    </p>
-                    <div className="flex items-center justify-between mt-1.5">
-                      <span className="text-[10px] text-muted-foreground">Stock: {prod.stock}</span>
-                      {enCarrito > 0 && (
-                        <Badge className="text-[10px] py-0 h-4">{enCarrito}</Badge>
-                      )}
                     </div>
+                    {enCarrito && (
+                      <span className="absolute top-2 right-2 flex items-center justify-center w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs font-bold shadow-xs">
+                        {enCarrito.cantidad}
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
           )}
         </div>
-      </div>
 
-      {/* Right: Cart & checkout */}
-      <div className="w-80 flex flex-col bg-background">
-        {/* Alumno identification */}
-        <div className="p-3 border-b space-y-2">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <User className="h-4 w-4" />
-            {selectedAlumno ? selectedAlumno.nombre : "Sin identificar"}
-          </div>
-          {selectedAlumno ? (
-            <div className="flex items-center gap-2">
-              <div className="flex-1 text-xs text-muted-foreground">
-                {selectedAlumno.curso}{selectedAlumno.seccion ? ` ${selectedAlumno.seccion}` : ""} ·
-                Saldo: {" "}
-                <span className={Number(selectedAlumno.cuentas_alumnos?.saldo ?? 0) < 0 ? "text-red-600 font-semibold" : "text-green-700 font-semibold"}>
-                  {fmtUsd(Number(selectedAlumno.cuentas_alumnos?.saldo ?? 0))}
+        {/* Panel Lateral: Identificación y Carrito (5 columnas en desktop) */}
+        <div className="lg:col-span-5 space-y-4">
+          {/* Identificación Obligatoria del Alumno */}
+          <Card className="border shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-bold flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <User className="h-4 w-4 text-primary" />
+                  Identificación de Cuenta
                 </span>
-              </div>
-              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => { setSelectedAlumno(null); setAlumnoSearch(""); }}>
-                ×
-              </Button>
-            </div>
-          ) : (
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-              <Input
-                className="pl-7 h-7 text-xs"
-                placeholder="Buscar alumno (nombre o cédula)"
-                value={alumnoSearch}
-                onChange={e => setAlumnoSearch(e.target.value)}
-              />
-              {searchingAlumno && (
-                <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 animate-spin text-muted-foreground" />
-              )}
-              {alumnoResults.length > 0 && !selectedAlumno && (
-                <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-md border bg-popover shadow-md max-h-48 overflow-y-auto">
-                  {alumnoResults.map(a => (
-                    <button
-                      key={a.id}
-                      className="w-full text-left px-3 py-2 text-xs hover:bg-accent"
-                      onClick={() => {
-                        setSelectedAlumno(a);
-                        setAlumnoSearch("");
-                        setAlumnoResults([]);
-                        // Si el alumno no tiene fiado, quitar fiado del método de pago
-                        if (!a.fiado_habilitado && metodoPago === "fiado") {
-                          setMetodoPago("efectivo_usd");
-                        }
-                      }}
+                {selectedAlumno && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-xs text-muted-foreground px-1"
+                    onClick={() => setSelectedAlumno(null)}
+                  >
+                    <X className="h-3.5 w-3.5 mr-1" /> Cambiar
+                  </Button>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-0">
+              {!selectedAlumno ? (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => setScannerOpen(true)}
+                      className="flex-1 h-12 text-sm font-semibold gap-2 shadow-xs bg-primary hover:bg-primary/90"
                     >
-                      <p className="font-medium">{a.nombre}</p>
-                      <p className="text-muted-foreground">{a.curso}{a.seccion ? ` ${a.seccion}` : ""}</p>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+                      <Camera className="h-5 w-5" />
+                      Escanear QR
+                    </Button>
+                  </div>
 
-        {/* Cart items */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {carrito.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
-              <ShoppingCart className="h-8 w-8 opacity-30" />
-              <p className="text-xs">Carrito vacío</p>
-            </div>
-          ) : (
-            carrito.map(item => (
-              <div key={item.id} className="flex items-center gap-2 rounded-md border px-2 py-1.5">
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{item.nombre}</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {fmtUsd(precioEfectivo(item))} c/u
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="O buscar nombre / cédula..."
+                      value={alumnoSearch}
+                      onChange={(e) => setAlumnoSearch(e.target.value)}
+                      className="pl-9 h-11 text-base sm:text-sm"
+                    />
+                  </div>
+
+                  {searchingAlumno && (
+                    <p className="text-xs text-muted-foreground text-center">Buscando alumno...</p>
+                  )}
+
+                  {alumnoResults.length > 0 && (
+                    <div className="border rounded-lg max-h-48 overflow-y-auto divide-y bg-popover shadow-md">
+                      {alumnoResults.map((a) => {
+                        const c = Array.isArray(a.cuentas_alumnos) ? a.cuentas_alumnos[0] : a.cuentas_alumnos;
+                        const s = Number(c?.saldo ?? 0);
+                        return (
+                          <button
+                            key={a.id}
+                            onClick={() => {
+                              setSelectedAlumno(a);
+                              setAlumnoSearch("");
+                              setAlumnoResults([]);
+                              setMetodoPago("saldo");
+                            }}
+                            className="w-full text-left p-2.5 hover:bg-accent text-xs flex justify-between items-center"
+                          >
+                            <div>
+                              <div className="font-semibold">{a.nombre}</div>
+                              <div className="text-muted-foreground">
+                                {a.curso} {a.seccion ? `• Sec. ${a.seccion}` : ""}
+                              </div>
+                            </div>
+                            <span
+                              className={`font-mono font-bold ${
+                                s >= 0 ? "text-emerald-600" : "text-destructive"
+                              }`}
+                            >
+                              ${s.toFixed(2)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <p className="text-[11px] text-muted-foreground text-center">
+                    Escanea el carnet o selecciona al alumno para activar el cobro.
                   </p>
                 </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => updateQty(item.id, -1)}
-                    className="h-5 w-5 rounded border flex items-center justify-center hover:bg-muted"
-                  >
-                    <Minus className="h-2.5 w-2.5" />
-                  </button>
-                  <span className="text-xs w-5 text-center">{item.cantidad}</span>
-                  <button
-                    onClick={() => updateQty(item.id, 1)}
-                    className="h-5 w-5 rounded border flex items-center justify-center hover:bg-muted"
-                  >
-                    <Plus className="h-2.5 w-2.5" />
-                  </button>
-                </div>
-                <p className="text-xs font-medium w-14 text-right tabular-nums">
-                  {fmtUsd(precioEfectivo(item) * item.cantidad)}
-                </p>
-                <button onClick={() => removeFromCart(item.id)} className="text-muted-foreground hover:text-destructive">
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </div>
-            ))
-          )}
-        </div>
+              ) : (
+                /* Alumno Identificado */
+                <div className="p-3 rounded-xl border bg-muted/30 space-y-2">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="font-bold text-base">{selectedAlumno.nombre}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {selectedAlumno.curso} {selectedAlumno.seccion ? `• Sec. ${selectedAlumno.seccion}` : ""}
+                      </div>
+                    </div>
+                    <Badge variant={selectedAlumno.fiado_habilitado ? "outline" : "secondary"} className="text-[10px]">
+                      {selectedAlumno.fiado_habilitado ? "Fiado Autorizado" : "Sin Fiado"}
+                    </Badge>
+                  </div>
 
-        {/* Totals & checkout */}
-        <div className="border-t p-3 space-y-3">
-          <Card className="shadow-none border">
-            <CardHeader className="p-2 pb-0">
-              <CardTitle className="text-xs text-muted-foreground">Total</CardTitle>
-            </CardHeader>
-            <CardContent className="p-2">
-              <p className="text-2xl font-bold tabular-nums">{fmtUsd(totalUsd)}</p>
-              {totalBs !== null && (
-                <p className="text-sm text-muted-foreground tabular-nums">{fmtBs(totalBs)}</p>
+                  <div className="flex items-center justify-between pt-2 border-t text-xs">
+                    <span className="text-muted-foreground">Saldo actual en cuenta:</span>
+                    <span
+                      className={`font-mono font-bold text-sm ${
+                        saldoAlumno >= 0 ? "text-emerald-600" : "text-destructive"
+                      }`}
+                    >
+                      ${saldoAlumno.toFixed(2)} {saldoAlumno < 0 ? "(Deuda)" : "(Disponible)"}
+                    </span>
+                  </div>
+
+                  {/* Selector de Modo de Cobro */}
+                  <div className="grid grid-cols-2 gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setMetodoPago("saldo")}
+                      className={`p-2 rounded-lg border text-xs font-semibold flex flex-col items-center justify-center transition-all ${
+                        metodoPago === "saldo"
+                          ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                          : "bg-background hover:bg-muted"
+                      }`}
+                    >
+                      <span>Saldo / QR</span>
+                      <span className="text-[10px] opacity-80">Débito a favor</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setMetodoPago("fiado")}
+                      disabled={!selectedAlumno.fiado_habilitado}
+                      className={`p-2 rounded-lg border text-xs font-semibold flex flex-col items-center justify-center transition-all ${
+                        metodoPago === "fiado"
+                          ? "bg-destructive text-destructive-foreground border-destructive shadow-xs"
+                          : !selectedAlumno.fiado_habilitado
+                          ? "opacity-50 cursor-not-allowed bg-muted"
+                          : "bg-background hover:bg-muted"
+                      }`}
+                    >
+                      <span>Fiado (Crédito)</span>
+                      <span className="text-[10px] opacity-80">Ingreso manual</span>
+                    </button>
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium">Método de pago</label>
-            <Select
-              value={metodoPago}
-              onValueChange={(v) => {
-                const val = (v ?? "efectivo_usd") as MetodoPago;
-                if (val === "fiado" && selectedAlumno && !selectedAlumno.fiado_habilitado) return;
-                setMetodoPago(val);
-              }}
-            >
-              <SelectTrigger className="h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {METODOS.map(m => {
-                  const fiadoBloqueado = m.value === "fiado" && selectedAlumno && !selectedAlumno.fiado_habilitado;
-                  return (
-                    <SelectItem
-                      key={m.value}
-                      value={m.value}
-                      disabled={!!fiadoBloqueado}
-                      className={fiadoBloqueado ? "opacity-40 cursor-not-allowed" : ""}
-                    >
-                      {m.label}
-                      {fiadoBloqueado ? " (no habilitado)" : ""}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-            {/* Aviso si fiado no está habilitado para el alumno seleccionado */}
-            {selectedAlumno && !selectedAlumno.fiado_habilitado && (
-              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                Este alumno no tiene fiado habilitado. Contacte al administrador.
-              </p>
-            )}
-            {selectedAlumno?.fiado_habilitado && selectedAlumno.limite_fiado_usd && (
-              <p className="text-[11px] text-muted-foreground">
-                Límite fiado: ${Number(selectedAlumno.limite_fiado_usd).toFixed(2)} ·
-                Saldo: {Number(selectedAlumno.cuentas_alumnos?.saldo ?? 0) < 0
-                  ? `-$${Math.abs(Number(selectedAlumno.cuentas_alumnos?.saldo ?? 0)).toFixed(2)}`
-                  : `$${Number(selectedAlumno.cuentas_alumnos?.saldo ?? 0).toFixed(2)}`}
-              </p>
-            )}
-          </div>
+          {/* Carrito de Compra */}
+          <Card className="border shadow-sm">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-sm font-bold">Carrito de Compra</CardTitle>
+              {carrito.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setCarrito([])}
+                  className="h-6 text-xs text-muted-foreground hover:text-destructive px-1"
+                >
+                  <Trash2 className="h-3 w-3 mr-1" /> Vaciar
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-3 pt-0">
+              {carrito.length === 0 ? (
+                <p className="text-xs text-center text-muted-foreground py-6">
+                  Toca productos del catálogo para agregarlos
+                </p>
+              ) : (
+                <div className="divide-y max-h-56 overflow-y-auto pr-1">
+                  {carrito.map((item) => {
+                    const p = precioEfectivo(item);
+                    return (
+                      <div key={item.id} className="py-2 flex items-center justify-between gap-2 text-xs">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold truncate">{item.nombre}</div>
+                          <div className="text-muted-foreground font-mono text-[11px]">${p.toFixed(2)} c/u</div>
+                        </div>
 
-          {(metodoPago === "pago_movil" || metodoPago === "transferencia" as MetodoPago) && (
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium">Referencia</label>
-              <Input
-                className="h-8 text-sm"
-                placeholder="Número de referencia"
-                value={referencia}
-                onChange={e => setReferencia(e.target.value)}
-              />
-            </div>
-          )}
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7 rounded-md"
+                            onClick={() => updateQty(item.id, -1)}
+                          >
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                          <span className="font-mono font-bold w-5 text-center">{item.cantidad}</span>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7 rounded-md"
+                            onClick={() => updateQty(item.id, 1)}
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                        </div>
 
-          {error && (
-            <p className="text-xs text-destructive rounded bg-destructive/10 px-2 py-1">{error}</p>
-          )}
+                        <div className="font-mono font-bold text-right min-w-[50px]">
+                          ${(p * item.cantidad).toFixed(2)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
-          <Button
-            className="w-full"
-            disabled={carrito.length === 0 || processing || !tasa}
-            onClick={confirmarVenta}
-          >
-            {processing ? (
-              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Procesando...</>
-            ) : (
-              `Cobrar ${fmtUsd(totalUsd)}`
-            )}
-          </Button>
+              {/* Totales */}
+              <div className="border-t pt-3 space-y-1">
+                <div className="flex justify-between items-baseline text-sm">
+                  <span className="font-medium text-muted-foreground">Total USD:</span>
+                  <span className="font-mono font-bold text-xl text-primary">${totalUsd.toFixed(2)}</span>
+                </div>
+                {totalBs !== null && (
+                  <div className="flex justify-between items-baseline text-xs text-muted-foreground">
+                    <span>Equivalente en Bs:</span>
+                    <span className="font-mono font-semibold">
+                      Bs. {totalBs.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
+              </div>
 
-          {carrito.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full text-xs"
-              onClick={() => setCarrito([])}
-            >
-              Vaciar carrito
-            </Button>
-          )}
+              {error && (
+                <div className="p-2.5 rounded-lg border border-destructive/30 bg-destructive/10 text-destructive text-xs flex items-center gap-1.5">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {/* Botón de Confirmación Principal (Desktop) */}
+              <div className="hidden lg:block pt-1">
+                <Button
+                  onClick={confirmarCobro}
+                  disabled={processing || carrito.length === 0 || !selectedAlumno}
+                  className="w-full h-12 text-sm font-bold tracking-wide shadow-md"
+                >
+                  {processing
+                    ? "Procesando..."
+                    : !selectedAlumno
+                    ? "Identifica al alumno para cobrar"
+                    : metodoPago === "fiado"
+                    ? `Confirmar Fiado ($${totalUsd.toFixed(2)})`
+                    : `Cobrar $${totalUsd.toFixed(2)} de Cuenta`}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
-      {/* Success modal / receipt */}
+      {/* Barra Fija Inferior para Teléfonos Móviles (Sticky Mobile Bar) */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 p-3 bg-background/95 backdrop-blur-md border-t shadow-lg z-40 flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-[11px] text-muted-foreground truncate">
+            {selectedAlumno ? selectedAlumno.nombre : "Sin alumno seleccionado"}
+          </div>
+          <div className="font-mono font-bold text-base leading-none text-primary">
+            ${totalUsd.toFixed(2)}{" "}
+            {totalBs !== null && <span className="text-xs text-muted-foreground font-normal">/ Bs. {totalBs.toFixed(1)}</span>}
+          </div>
+        </div>
+
+        <Button
+          onClick={confirmarCobro}
+          disabled={processing || carrito.length === 0 || !selectedAlumno}
+          className="h-12 px-5 font-bold shadow-md shrink-0"
+        >
+          {processing
+            ? "..."
+            : !selectedAlumno
+            ? "Seleccionar Alumno"
+            : metodoPago === "fiado"
+            ? "Confirmar Fiado"
+            : "Cobrar"}
+        </Button>
+      </div>
+
+      {/* Modal de Escáner QR de Cámara */}
+      <QrScannerModal
+        open={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onScanSuccess={handleQrScan}
+      />
+
+      {/* Modal de Éxito y Recibo */}
       <Dialog open={successModal} onOpenChange={setSuccessModal}>
-        <DialogContent className="sm:max-w-sm text-center">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-center gap-2">
-              {lastRecibo?.id.startsWith("OFFLINE-") ? (
-                <>
-                  <WifiOff className="h-5 w-5 text-amber-600" />
-                  Venta guardada (sin conexión)
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="h-5 w-5 text-green-600" />
-                  Venta registrada
-                </>
-              )}
-            </DialogTitle>
-          </DialogHeader>
+        <DialogContent className="max-w-sm text-center p-6 space-y-4">
+          <div className="flex justify-center">
+            <div className="h-16 w-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
+              <CheckCircle className="h-10 w-10" />
+            </div>
+          </div>
+
+          <div>
+            <DialogTitle className="text-xl font-bold">¡Cobro Registrado!</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              La cuenta de {lastRecibo?.alumnoNombre ?? "alumno"} ha sido actualizada.
+            </p>
+          </div>
+
           {lastRecibo && (
-            <div className="space-y-3 py-2">
-              {lastRecibo.id.startsWith("OFFLINE-") && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-                  La venta se enviará al servidor cuando se restablezca la conexión.
-                </p>
-              )}
-              <div className="rounded-md border p-4 space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total USD</span>
-                  <span className="font-bold">{fmtUsd(lastRecibo.totalUsd)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total Bs</span>
-                  <span className="font-semibold">{fmtBs(lastRecibo.totalBs)}</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Tasa BCV</span>
-                  <span>{lastRecibo.tasa.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Referencia</span>
-                  <span className="font-mono text-xs">{lastRecibo.id.slice(-8).toUpperCase()}</span>
-                </div>
+            <div className="bg-muted/40 p-3.5 rounded-xl text-left text-xs space-y-1.5 border font-mono">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Total USD:</span>
+                <span className="font-bold text-sm text-foreground">${lastRecibo.totalUsd.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Total Bs:</span>
+                <span>Bs. {lastRecibo.totalBs.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Modalidad:</span>
+                <span>{lastRecibo.metodoPago}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Fecha:</span>
+                <span>{lastRecibo.fecha}</span>
               </div>
             </div>
           )}
-          <DialogFooter className="flex-col gap-2">
-            {lastRecibo && !lastRecibo.id.startsWith("OFFLINE-") && (
-              <Button variant="outline" className="w-full gap-2" onClick={descargarPDF}>
-                <Download className="h-4 w-4" /> Descargar PDF
-              </Button>
-            )}
-            <Button className="w-full" onClick={() => setSuccessModal(false)}>
-              Nueva venta
+
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={descargarReciboPdf}>
+              <FileDown className="h-4 w-4 mr-1.5" /> Recibo PDF
             </Button>
-          </DialogFooter>
+            <Button className="flex-1" onClick={() => setSuccessModal(false)}>
+              Listo / Siguiente
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

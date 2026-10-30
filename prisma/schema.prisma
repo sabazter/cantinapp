@@ -44,6 +44,7 @@ enum Rol {
   directivo
   superadmin
   profesor
+  alumno
 }
 
 model Usuario {
@@ -66,6 +67,7 @@ model Usuario {
 
   cantina          Cantina?       @relation(fields: [cantinaId], references: [id])
   alumnos          Alumno[]       @relation("RepresentanteAlumnos")
+  perfilAlumno     Alumno?        @relation("UsuarioAlumno")
   ventasRealizadas Venta[]        @relation("VendedorVentas")
   abonosConfirmados Abono[]       @relation("AdminAbonos")
   notificaciones   Notificacion[]
@@ -140,6 +142,7 @@ model Alumno {
   id                  String    @id @default(cuid())
   cantinaId           String    @map("cantina_id")
   representanteId     String?   @map("representante_id")
+  usuarioId           String?   @unique @map("usuario_id")
   nombre              String
   cedulaEncriptada    String    @map("cedula_encriptada")
   curso               String
@@ -158,6 +161,7 @@ model Alumno {
 
   cantina          Cantina   @relation(fields: [cantinaId], references: [id])
   representante    Usuario?  @relation("RepresentanteAlumnos", fields: [representanteId], references: [id])
+  usuario          Usuario?  @relation("UsuarioAlumno", fields: [usuarioId], references: [id])
   cuenta           CuentaAlumno?
   ventas           Venta[]
 

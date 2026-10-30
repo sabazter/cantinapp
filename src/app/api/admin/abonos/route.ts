@@ -15,7 +15,7 @@ const abonoSchema = z.object({
   banco:      z.string().max(60).optional(),
 });
 
-// POST /api/admin/abonos — registrar abono (pendiente de confirmación)
+// POST /api/admin/abonos — registrar abono
 export const POST = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "vendedor", "admin", "superadmin");
 
@@ -43,8 +43,8 @@ export const POST = withAuth(async (req: NextRequest, session) => {
   }
 
   const tasaInfo = await tasaActivaBcv(cantinaId);
-
-  const referenciaEncriptada = body.referencia ? encrypt(body.referencia) : null;
+  const esEfectivo = body.metodo === "efectivo_usd" || body.metodo === "efectivo_bs";
+  const referenciaEncriptada = !esEfectivo && body.referencia ? encrypt(body.referencia) : null;
   const montoBs = tasaInfo ? body.montoUsd * tasaInfo.tasa : null;
 
   const { data: abono, error: abonoErr } = await supabase
@@ -56,13 +56,13 @@ export const POST = withAuth(async (req: NextRequest, session) => {
       tasa_bcv:             tasaInfo?.tasa ?? null,
       metodo:               body.metodo,
       referencia_encriptada: referenciaEncriptada,
-      banco:                body.banco ?? null,
+      banco:                esEfectivo ? null : body.banco ?? null,
       estado:               "pendiente",
     })
     .select("id")
     .single();
 
-  if (abonoErr || !abono) throw abonoErr ?? new Error("Error insertando abono");
+  if (abonoErr || !abono) throw abonoErr ?? new Error("Error registrando abono");
 
   await audit({
     usuarioId: session.user.id,
@@ -70,29 +70,37 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     evento:    AuditEvent.ABONO_CREADO,
     entidad:   "abonos",
     entidadId: abono.id,
-    datos:     { alumnoId: body.alumnoId, montoUsd: body.montoUsd, metodo: body.metodo },
+    datos: {
+      alumnoId: body.alumnoId,
+      montoUsd: body.montoUsd,
+      metodo:   body.metodo,
+    },
   });
 
   return NextResponse.json({ id: abono.id }, { status: 201 });
 });
 
-// GET /api/admin/abonos — lista de abonos pendientes
+// GET /api/admin/abonos — listar abonos
 export const GET = withAuth(async (req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin");
 
   const cantinaId = session.user.cantinaId!;
-  const supabase  = createServerSupabase();
   const { searchParams } = new URL(req.url);
   const estado = searchParams.get("estado") ?? "pendiente";
+
+  const supabase = createServerSupabase();
 
   const { data, error } = await supabase
     .from("abonos")
     .select(`
-      id, monto_usd, monto_bs, metodo, banco, estado,
-      created_at, confirmado_at,
+      id, monto_usd, monto_bs, tasa_bcv, metodo, banco, comprobante_url,
+      estado, motivo_rechazo, created_at, confirmado_at,
       cuentas_alumnos (
-        alumno_id,
-        alumnos ( id, nombre, curso, cantina_id )
+        id, saldo,
+        alumnos (
+          id, nombre, curso, seccion, cantina_id,
+          representante:usuarios!alumnos_representante_id_fkey(nombre, telefono)
+        )
       )
     `)
     .eq("estado", estado)
@@ -102,11 +110,12 @@ export const GET = withAuth(async (req: NextRequest, session) => {
 
   if (error) throw error;
 
-  // Filtrar por cantina a través del alumno
-  const filtrado = (data ?? []).filter(a => {
-    const ca = (a.cuentas_alumnos as unknown as { alumnos: { cantina_id: string } | null } | null);
-    return ca?.alumnos?.cantina_id === cantinaId;
+  // Filtrar por cantina
+  const filtrados = (data ?? []).filter((a: any) => {
+    const cuenta = Array.isArray(a.cuentas_alumnos) ? a.cuentas_alumnos[0] : a.cuentas_alumnos;
+    const alumno = Array.isArray(cuenta?.alumnos) ? cuenta?.alumnos[0] : cuenta?.alumnos;
+    return alumno?.cantina_id === cantinaId;
   });
 
-  return NextResponse.json(filtrado);
+  return NextResponse.json(filtrados);
 });

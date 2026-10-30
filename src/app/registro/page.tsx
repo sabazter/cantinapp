@@ -47,7 +47,7 @@ export default function RegistroPage() {
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState<string | null>(null);
   const [paraMiMismo,  setParaMiMismo]  = useState(false);
-  const [tipoRegistro, setTipoRegistro] = useState<"representante" | "profesor">("representante");
+  const [tipoRegistro, setTipoRegistro] = useState<"representante" | "profesor" | "alumno">("representante");
 
   const repForm = useForm<RepForm>({
     resolver: zodResolver(repSchema),
@@ -155,14 +155,14 @@ export default function RegistroPage() {
                 {/* Tipo de cuenta */}
                 <div className="space-y-1.5">
                   <Label>Tipo de cuenta</Label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => {
                         setTipoRegistro("representante");
                         setParaMiMismo(false);
                       }}
-                      className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                      className={`flex items-center justify-center gap-1.5 rounded-md border px-2 py-2 text-xs sm:text-sm font-medium transition-colors ${
                         tipoRegistro === "representante"
                           ? "border-primary bg-primary/5 text-primary font-semibold"
                           : "border-input bg-transparent hover:bg-muted text-muted-foreground"
@@ -173,16 +173,30 @@ export default function RegistroPage() {
                     <button
                       type="button"
                       onClick={() => {
+                        setTipoRegistro("alumno");
+                        setParaMiMismo(true);
+                      }}
+                      className={`flex items-center justify-center gap-1.5 rounded-md border px-2 py-2 text-xs sm:text-sm font-medium transition-colors ${
+                        tipoRegistro === "alumno"
+                          ? "border-primary bg-primary/5 text-primary font-semibold"
+                          : "border-input bg-transparent hover:bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      Alumno
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
                         setTipoRegistro("profesor");
                         setParaMiMismo(true);
                       }}
-                      className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                      className={`flex items-center justify-center gap-1.5 rounded-md border px-2 py-2 text-xs sm:text-sm font-medium transition-colors ${
                         tipoRegistro === "profesor"
                           ? "border-primary bg-primary/5 text-primary font-semibold"
                           : "border-input bg-transparent hover:bg-muted text-muted-foreground"
                       }`}
                     >
-                      Profesor / Personal
+                      Profesor
                     </button>
                   </div>
                 </div>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole, withAuth } from "@/lib/require-role";
 import { createServerSupabase } from "@/lib/supabase-server";
+import { tasaActivaBcv } from "@/lib/bcv";
 
 export const GET = withAuth(async (_req: NextRequest, session) => {
   requireRole(session, "admin", "superadmin");
@@ -8,14 +9,13 @@ export const GET = withAuth(async (_req: NextRequest, session) => {
   const cantinaId = session.user.cantinaId!;
   const supabase  = createServerSupabase();
   const hoy       = new Date().toISOString().slice(0, 10);
-  const hace6d    = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
 
   const [
     { data: ventasHoyData },
-    { data: ventasSemanaData },
-    { data: prodStock },
     { count: alumnosActivos },
-    { data: fiadoPendienteData },
+    { data: abonosPendientesData },
+    { data: deudoresData },
+    tasaInfo,
   ] = await Promise.all([
     supabase
       .from("ventas")
@@ -24,19 +24,6 @@ export const GET = withAuth(async (_req: NextRequest, session) => {
       .is("deleted_at", null)
       .gte("created_at", `${hoy}T00:00:00`)
       .lte("created_at", `${hoy}T23:59:59`),
-
-    supabase
-      .from("ventas")
-      .select("total_usd, metodo_pago, created_at")
-      .eq("cantina_id", cantinaId)
-      .is("deleted_at", null)
-      .gte("created_at", `${hace6d}T00:00:00`),
-
-    supabase
-      .from("productos")
-      .select("stock, stock_min")
-      .eq("cantina_id", cantinaId)
-      .eq("activo", true),
 
     supabase
       .from("alumnos")
@@ -51,47 +38,83 @@ export const GET = withAuth(async (_req: NextRequest, session) => {
       .eq("cantina_id", cantinaId)
       .eq("estado", "pendiente")
       .is("deleted_at", null),
+
+    supabase
+      .from("cuentas_alumnos")
+      .select(`
+        saldo,
+        alumno:alumnos!inner (
+          id,
+          nombre,
+          curso,
+          seccion,
+          cantina_id,
+          activo,
+          deleted_at,
+          fiado_habilitado,
+          limite_fiado_usd,
+          representante:usuarios!alumnos_representante_id_fkey (
+            nombre,
+            telefono
+          )
+        )
+      `)
+      .eq("alumno.cantina_id", cantinaId)
+      .eq("alumno.activo", true)
+      .is("alumno.deleted_at", null)
+      .lt("saldo", 0)
+      .order("saldo", { ascending: true })
+      .limit(10),
+
+    tasaActivaBcv(cantinaId),
   ]);
 
-  // KPIs del día
-  const ventasHoy      = ventasHoyData ?? [];
-  const ventasHoyUsd   = ventasHoy.reduce((s, v) => s + Number(v.total_usd), 0);
+  const tasaBcv = tasaInfo?.tasa ?? 1;
 
-  // Por método de pago (hoy)
-  const metodosMap: Record<string, number> = {};
-  for (const v of ventasHoy) {
-    metodosMap[v.metodo_pago] = (metodosMap[v.metodo_pago] ?? 0) + Number(v.total_usd);
-  }
-  const porMetodoPago = Object.entries(metodosMap).map(([metodo, totalUsd]) => ({ metodo, totalUsd }));
+  // Ventas de hoy ($ por cobrar)
+  const ventasHoy    = ventasHoyData ?? [];
+  const ventasHoyUsd = ventasHoy.reduce((s, v) => s + Number(v.total_usd), 0);
 
-  // Fiado pendiente (abonos en revisión)
-  const fiadoPendiente    = fiadoPendienteData ?? [];
-  const fiadoPendienteUsd = fiadoPendiente.reduce((s, a) => s + Number(a.monto_usd), 0);
+  // Abonos pendientes por verificar
+  const abonosPendientes    = abonosPendientesData ?? [];
+  const abonosPendientesUsd = abonosPendientes.reduce((s, a) => s + Number(a.monto_usd), 0);
 
-  // Stock bajo
-  const stockBajoCount = (prodStock ?? []).filter(p => p.stock <= p.stock_min).length;
+  // Mapear Top 10 Clientes que más deben
+  const topDeudores = (deudoresData ?? []).map((row: any) => {
+    const al = Array.isArray(row.alumno) ? row.alumno[0] : row.alumno;
+    const rep = Array.isArray(al?.representante) ? al.representante[0] : al?.representante;
+    const deudaUsd = Math.abs(Number(row.saldo));
+    const deudaBs  = deudaUsd * tasaBcv;
 
-  // Ventas agrupadas por día (últimos 7 días)
-  const ventasPorDia: Record<string, { count: number; totalUsd: number }> = {};
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
-    ventasPorDia[d] = { count: 0, totalUsd: 0 };
-  }
-  for (const v of ventasSemanaData ?? []) {
-    const d = (v.created_at as string).slice(0, 10);
-    if (ventasPorDia[d]) {
-      ventasPorDia[d].count    += 1;
-      ventasPorDia[d].totalUsd  = +(ventasPorDia[d].totalUsd + Number(v.total_usd)).toFixed(2);
-    }
-  }
-  const ventasSemana = Object.entries(ventasPorDia).map(([fecha, data]) => ({ fecha, ...data }));
+    return {
+      alumnoId:            al?.id ?? "",
+      nombre:              al?.nombre ?? "Sin nombre",
+      curso:               al?.curso ?? "",
+      seccion:             al?.seccion ?? "",
+      deudaUsd:            +deudaUsd.toFixed(2),
+      deudaBs:             +deudaBs.toFixed(2),
+      representanteNombre: rep?.nombre ?? "Sin representante",
+      representanteTel:    rep?.telefono ?? null,
+      limiteFiadoUsd:      al?.limite_fiado_usd ? Number(al.limite_fiado_usd) : null,
+      fiadoHabilitado:     Boolean(al?.fiado_habilitado),
+    };
+  });
+
+  // Total deuda de los top o general
+  const totalDeudaUsd = topDeudores.reduce((sum, d) => sum + d.deudaUsd, 0);
 
   return NextResponse.json({
-    ventasHoy:      { count: ventasHoy.length, totalUsd: +ventasHoyUsd.toFixed(2) },
-    fiadoPendiente: { count: fiadoPendiente.length, totalUsd: +fiadoPendienteUsd.toFixed(2) },
-    stockBajo:      stockBajoCount,
+    ventasHoy: {
+      count:    ventasHoy.length,
+      totalUsd: +ventasHoyUsd.toFixed(2),
+    },
+    abonosPendientes: {
+      count:    abonosPendientes.length,
+      totalUsd: +abonosPendientesUsd.toFixed(2),
+    },
     alumnosActivos: alumnosActivos ?? 0,
-    ventasSemana,
-    porMetodoPago,
+    totalDeudaUsd:  +totalDeudaUsd.toFixed(2),
+    tasaBcv,
+    topDeudores,
   });
 });

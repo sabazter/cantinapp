@@ -11,6 +11,7 @@ const ROLE_REDIRECTS: Record<string, string> = {
   representante: "/portal",
   directivo: "/reportes",
   superadmin: "/superadmin",
+  alumno: "/alumno",
 };
 
 export default async function LoginPage() {

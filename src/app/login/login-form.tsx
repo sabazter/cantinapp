@@ -24,6 +24,7 @@ const ROLE_REDIRECTS: Record<string, string> = {
   vendedor:      "/caja",
   representante: "/portal",
   directivo:     "/reportes",
+  alumno:        "/alumno",
 };
 
 export function LoginForm() {

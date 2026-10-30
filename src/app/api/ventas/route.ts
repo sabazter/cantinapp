@@ -44,14 +44,11 @@ export const POST = withAuth(async (req: NextRequest, session) => {
 
   if (prodErr || !productos) throw prodErr ?? new Error("Error cargando productos");
 
-  // Validaciones de productos
+  // Validaciones de productos (activo y cantina_id)
   for (const item of body.items) {
     const prod = productos.find(p => p.id === item.productoId);
     if (!prod || !prod.activo || prod.cantina_id !== cantinaId) {
       return NextResponse.json({ error: `Producto no disponible` }, { status: 400 });
-    }
-    if (prod.stock < item.cantidad) {
-      return NextResponse.json({ error: `Stock insuficiente para "${prod.nombre}"` }, { status: 400 });
     }
   }
 
@@ -131,22 +128,11 @@ export const POST = withAuth(async (req: NextRequest, session) => {
     };
   });
 
-  // Insertar detalles + descontar stock + actualizar saldo si fiado
-  // Insertar detalles y descontar stock en paralelo
-  await Promise.all([
-    supabase.from("detalle_ventas").insert(detalles).then(() => {}),
-    ...body.items.map(item => {
-      const prod = productos.find(p => p.id === item.productoId)!;
-      return supabase
-        .from("productos")
-        .update({ stock: prod.stock - item.cantidad })
-        .eq("id", item.productoId)
-        .then(() => {});
-    }),
-  ]);
+  // Insertar detalles de la venta (sin control ni descuento de stock)
+  await supabase.from("detalle_ventas").insert(detalles);
 
-  // Actualizar saldo si es fiado
-  if (body.metodoPago === "fiado" && body.alumnoId) {
+  // Actualizar saldo del alumno si aplica
+  if (body.alumnoId) {
     const { data: cuenta } = await supabase
       .from("cuentas_alumnos")
       .select("id, saldo")
