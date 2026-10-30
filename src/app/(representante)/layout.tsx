@@ -8,13 +8,13 @@ export default async function RepresentanteLayout({ children }: { children: Reac
   if (session.user.rol !== "representante" && session.user.rol !== "profesor") redirect("/login");
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex flex-col md:flex-row h-screen overflow-hidden bg-background">
       <AppSidebar
         nombre={session.user.nombre}
         email={session.user.email}
         rol={session.user.rol}
       />
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto w-full min-w-0 pb-16 md:pb-0">
         {children}
       </main>
     </div>
