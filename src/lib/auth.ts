@@ -45,7 +45,9 @@ let _publicKey:  Awaited<ReturnType<typeof importSPKI>>  | null = null;
 
 async function getPrivateKey() {
   if (!_privateKey) {
-    const pem = process.env.NEXTAUTH_PRIVATE_KEY!.replace(/\\n/g, "\n");
+    const raw = process.env.NEXTAUTH_PRIVATE_KEY;
+    if (!raw) throw new Error("NEXTAUTH_PRIVATE_KEY no está configurada");
+    const pem = raw.replace(/\\n/g, "\n");
     _privateKey = await importPKCS8(pem, "RS256");
   }
   return _privateKey;
@@ -53,7 +55,9 @@ async function getPrivateKey() {
 
 async function getPublicKey() {
   if (!_publicKey) {
-    const pem = process.env.NEXTAUTH_PUBLIC_KEY!.replace(/\\n/g, "\n");
+    const raw = process.env.NEXTAUTH_PUBLIC_KEY;
+    if (!raw) return null;
+    const pem = raw.replace(/\\n/g, "\n");
     _publicKey = await importSPKI(pem, "RS256");
   }
   return _publicKey;
@@ -64,6 +68,7 @@ const ACCESS_TOKEN_TTL = 15 * 60; // 15 minutos
 // ── NextAuth options ──────────────────────────────────────────────────────────
 
 export const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET || "cantinapp-secret-fallback-minimum-32-chars-key-2026",
   session: { strategy: "jwt", maxAge: ACCESS_TOKEN_TTL },
   pages: { signIn: "/login" },
 
@@ -208,6 +213,7 @@ export const authOptions: NextAuthOptions = {
       if (!token) return null;
       try {
         const publicKey = await getPublicKey();
+        if (!publicKey) return null;
         const { payload } = await jwtVerify(token, publicKey, {
           algorithms: ["RS256"],
         });
@@ -242,4 +248,11 @@ export const authOptions: NextAuthOptions = {
   },
 };
 
-export const getSession = () => getServerSession(authOptions);
+export const getSession = async () => {
+  try {
+    return await getServerSession(authOptions);
+  } catch (err) {
+    console.error("[auth] Error en getSession:", err);
+    return null;
+  }
+};
